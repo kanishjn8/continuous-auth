@@ -53,6 +53,26 @@ impossible (every training function takes one user's windows) and asserted
 by test. Artifacts refuse to load on feature-schema mismatch or checksum
 corruption.
 
+## T-011 status
+
+Implemented: day-disjoint and leave-one-day-out splitting
+(`ml/evaluation/splitting.py`, random splitting is not exposed anywhere in
+this package), window-level FAR/FRR/EER/ROC-DET curve data with per-user
+distributions and bootstrap CIs (`ml/evaluation/metrics.py`), zero-effort
+(I1) impostor cross-evaluation and the required I1 pairwise matrix
+(`ml/evaluation/cross_evaluation.py`), the dual-model fusion ablation
+(`ml/evaluation/fusion.py`), and an orchestration layer
+(`ml/evaluation/pipeline.py`) that runs the required baseline comparison
+(Isolation Forest vs Mahalanobis-to-centroid vs One-Class SVM, identical
+splits/features/calibration) and the enrollment-length experiment. Exclusions
+(e.g. a user with too little data for a given model type) are recorded
+explicitly, never silent. Trained artifacts are retained in evaluation
+results for reproducibility traceability.
+
+I2 (informed impostor) and the live hijack drill (Section 13.3) require
+human participants and real hardware and are out of scope for this
+package — see PLAN.md Section 13.2/13.3 and TASK_DELEGATION.md Section 10.
+
 ## Running tests
 
 ```bash
