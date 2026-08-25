@@ -65,3 +65,33 @@ def mouse_scroll(seq: int, t_us: int, dy: float = -1.0) -> MouseEvent:
 @pytest.fixture()
 def ml_config():
     return load_config()
+
+
+def generate_user_windows(user_id: str, seed: int, config, *, duration_minutes: int = 60, **profile_kwargs):
+    """Test helper: synthesize enough FeatureWindows for one user to exceed
+    typical min_baseline_windows thresholds, via the real T-008 pipeline.
+    """
+    from ml.datasets.synthetic import SyntheticUserProfile, generate_segment
+    from ml.features.extractor import extract_windows
+    from ml.features.schema import Provenance
+
+    profile = SyntheticUserProfile(user_id=user_id, **profile_kwargs)
+    seg = generate_segment(
+        profile,
+        seed=seed,
+        session_id=f"{user_id}-s1",
+        segment_id=f"{user_id}-seg1",
+        collection_day="2026-01-01",
+        duration_us=duration_minutes * 60 * 1_000_000,
+    )
+    return extract_windows(
+        seg.keyboard_events,
+        seg.mouse_events,
+        seg.context_events,
+        user_id=user_id,
+        session_id=seg.session_id,
+        segment_id=seg.segment_id,
+        collection_day=seg.collection_day,
+        provenance=Provenance.SYNTHETIC,
+        config=config,
+    )

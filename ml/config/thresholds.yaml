@@ -60,6 +60,17 @@ isolation_forest:
   max_samples: "auto"
   random_state: 42
 
+# PLAN.md Section 10.4 required baseline comparisons.
+mahalanobis_baseline:
+  # Ridge added to the covariance diagonal before inversion, for numerical
+  # stability when per-user sample size is close to the feature dimension.
+  ridge: 1.0e-6
+
+one_class_svm_baseline:
+  kernel: "rbf"
+  nu: 0.1
+  gamma: "scale"
+
 calibration:
   # Percentile calibration (PLAN.md Section 10.6) - no free parameters
   # beyond the enrollment distribution itself, kept here for symmetry /

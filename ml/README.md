@@ -41,6 +41,18 @@ made, and where to look when reconciling against the real `protocol/`:
 - `tests/` — one test module per implementation module; run with
   `pytest ml/tests -q` from the repo root.
 
+## T-010 status
+
+Implemented: per-user, per-modality Isolation Forest training
+(`ml/training/isolation_forest.py`), shared preprocessing/calibration/
+persistence machinery (`ml/training/common.py`, `ml/training/persistence.py`),
+and both required baselines (`ml/baselines/mahalanobis.py`,
+`ml/baselines/alt_one_class.py`) trained through the identical procedure so
+comparisons are apples-to-apples. Cross-user contamination is structurally
+impossible (every training function takes one user's windows) and asserted
+by test. Artifacts refuse to load on feature-schema mismatch or checksum
+corruption.
+
 ## Running tests
 
 ```bash
