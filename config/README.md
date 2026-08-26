@@ -29,3 +29,6 @@ profiles are invented engineering inputs, never participant measurements. Genera
 events, windows, and scores are development mechanics only and are explicitly ineligible
 for headline evaluation.
 
+`ingestion.development.yaml` supplies the bounded frame size, memory-only raw-event ring,
+and configurable ADR-007 idle split used by T-007 local development. It contains no
+production risk or enforcement thresholds.

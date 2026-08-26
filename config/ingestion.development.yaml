@@ -1,0 +1,8 @@
+# T-007 local engineering configuration. The idle split is the configurable
+# initial value mandated by ADR-007; it is not an authentication feature.
+config_version: t007-development-v1
+protocol_version: 1.0.0
+ingestion:
+  max_frame_bytes: 65536
+  raw_event_ring_capacity: 2048
+  idle_split_seconds: 900
