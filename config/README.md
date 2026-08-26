@@ -36,3 +36,7 @@ production risk or enforcement thresholds.
 `risk.development.yaml` exists only to exercise T-013 with synthetic fixtures. Its O3,
 O7, O8, and O9 values are explicitly provisional; it is not a production `thresholds.yaml`
 and does not resolve the Plan's open experiment/human-approval items.
+
+`context.development.yaml` similarly provides provisional T-012 bootstrap/floor values
+for synthetic testing. Real category observations and human review are still required
+before an efficacy claim or production policy can be made.

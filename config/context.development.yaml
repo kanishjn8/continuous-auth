@@ -1,0 +1,16 @@
+# T-012 local/synthetic policy only. Bootstrap weights and the empirical
+# observation requirement remain provisional pending category data and review.
+config_version: t012-synthetic-development-v1
+protocol_version: 1.0.0
+development_only: true
+context:
+  confidence_floor: 0.5
+  min_empirical_observations: 4
+  bootstrap_weights:
+    PRODUCTIVITY: 0.9
+    BROWSING: 0.85
+    DEVELOPMENT: 0.9
+    CREATIVE: 0.7
+    GAMING: 0.65
+    SYSTEM: 0.9
+    UNKNOWN: 1.0
