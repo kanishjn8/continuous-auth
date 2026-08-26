@@ -34,7 +34,13 @@ include = ["backend*", "ml*", "protocol*", "tools*"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers"
-testpaths = ["backend/tests", "ml/tests", "protocol/tests", "tools/guardrails/tests"]
+testpaths = [
+  "backend/tests",
+  "ml/tests",
+  "protocol/tests",
+  "tools/guardrails/tests",
+  "tools/synthetic/tests",
+]
 
 [tool.ruff]
 target-version = "py311"
@@ -52,7 +58,7 @@ extend-exclude = "protocol/generated"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-exclude = ["protocol/generated", "ml/tests"]
+exclude = ["protocol/generated", "ml/tests", "tools/synthetic/tests"]
 
 [[tool.mypy.overrides]]
 module = ["joblib", "sklearn.*"]

@@ -7,14 +7,9 @@ data, and must never be given real participant data as a development
 fixture." PLAN.md Section 9.6: synthetic data "may train models" for
 mechanics validation only, and "may [not] produce headline results."
 
-Ownership note: T-003 (the full synthetic generator, including
-malformed/gap/duplicate-frame fault injection at the IPC-frame level) is
-Kanish's task. This module is a **lighter-weight generator scoped to
-pipeline validation** for T-008/T-010/T-011 mechanics (item 2 in Manas's
-priority list) — deterministic per-user behavioral profiles producing
-already-typed (schema-level, not IPC-frame-level) event streams. It does
-not attempt frame-level fault injection (malformed frames, drops,
-duplicates); that remains T-003/T-005 scope.
+The full T-003 generator lives in ``tools.synthetic`` and adds authoritative
+C1 framing, transport faults, C2 outputs, and score/risk assertions. This
+module remains a lighter-weight ML corpus helper for T-008/T-010/T-011 tests.
 
 Every event produced here carries ``Provenance.SYNTHETIC``.
 """

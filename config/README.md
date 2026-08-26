@@ -24,4 +24,8 @@ Its retention values are engineering limits for local testing, not approved rese
 participant-data policy. Pilot/evaluation collection requires a separately reviewed C9
 configuration.
 
+`synthetic.development.yaml` is the validated T-003 fixture definition. Its behavioral
+profiles are invented engineering inputs, never participant measurements. Generated
+events, windows, and scores are development mechanics only and are explicitly ineligible
+for headline evaluation.
 
