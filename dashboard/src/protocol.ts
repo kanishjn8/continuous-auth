@@ -13,5 +13,3 @@ export function foundationStatus(): FoundationStatus {
     protectionStatus: "INITIALIZING",
   };
 }
-
-

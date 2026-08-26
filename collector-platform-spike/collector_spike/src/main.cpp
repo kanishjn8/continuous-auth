@@ -68,7 +68,8 @@ bool parse_report_interval(int argc, char** argv, std::chrono::milliseconds& int
     char* end = nullptr;
     const auto parsed = std::strtoull(argv[2], &end, 10);
     if (errno != 0 || end == argv[2] || *end != '\0' || parsed < 1'000ULL || parsed > 60'000ULL ||
-        parsed > static_cast<unsigned long long>(std::numeric_limits<std::int64_t>::max())) {
+        parsed >
+            static_cast<unsigned long long>((std::numeric_limits<std::int64_t>::max)())) {
         return false;
     }
     interval = std::chrono::milliseconds(parsed);

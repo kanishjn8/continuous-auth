@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import Callable, Literal, Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 
@@ -168,7 +168,7 @@ class ModelArtifact:
         including the fitted sklearn ``model`` before any field could be
         dropped, which is wasted work every time a checksum is computed.
         """
-        d = {
+        d: dict[str, object] = {
             "user_id": self.user_id,
             "modality": self.modality,
             "model_type": self.model_type,

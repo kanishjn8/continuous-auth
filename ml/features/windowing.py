@@ -95,10 +95,10 @@ def _dominant_device_class(
     kbd: Sequence[KeyboardEvent], mouse: Sequence[MouseEvent]
 ) -> DeviceClass:
     counts: Counter[DeviceClass] = Counter()
-    for event in kbd:
-        counts[event.device_class] += 1
-    for event in mouse:
-        counts[event.device_class] += 1
+    for keyboard_event in kbd:
+        counts[keyboard_event.device_class] += 1
+    for mouse_event in mouse:
+        counts[mouse_event.device_class] += 1
     if not counts:
         return DeviceClass.UNKNOWN
     return counts.most_common(1)[0][0]

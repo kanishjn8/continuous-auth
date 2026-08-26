@@ -10,5 +10,3 @@ test("foundation status never implies active protection", () => {
     protectionStatus: "INITIALIZING",
   });
 });
-
-

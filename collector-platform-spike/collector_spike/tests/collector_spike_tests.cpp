@@ -82,7 +82,7 @@ void test_concurrent_capture_accounting_is_bounded_and_exact() {
     workers.reserve(worker_count);
 
     for (int worker = 0; worker < worker_count; ++worker) {
-        workers.emplace_back([&metrics, worker]() {
+        workers.emplace_back([&metrics, worker, events_per_worker]() {
             for (int event = 0; event < events_per_worker; ++event) {
                 if ((worker + event) % 2 == 0) {
                     metrics.record_keyboard();

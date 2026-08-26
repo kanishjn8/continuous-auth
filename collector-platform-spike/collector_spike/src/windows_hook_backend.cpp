@@ -86,7 +86,8 @@ bool WindowsHookBackend::start(std::string& error) {
 
 PollStatus WindowsHookBackend::poll_for(std::chrono::milliseconds timeout, std::string& error) {
     const auto timeout_count = timeout.count();
-    const auto maximum_timeout = static_cast<decltype(timeout_count)>(std::numeric_limits<DWORD>::max());
+    const auto maximum_timeout =
+        static_cast<decltype(timeout_count)>((std::numeric_limits<DWORD>::max)());
     const auto timeout_ms = timeout_count < 0
                                 ? DWORD{0}
                                 : static_cast<DWORD>(

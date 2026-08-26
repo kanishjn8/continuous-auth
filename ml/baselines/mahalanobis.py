@@ -48,7 +48,7 @@ def train_user_modality_mahalanobis(
     config: MLConfig,
 ) -> ModelArtifact:
     ridge = float(config.raw["mahalanobis_baseline"]["ridge"])
-    hyperparameters = {"ridge": ridge}
+    hyperparameters: dict[str, object] = {"ridge": ridge}
     return train_one_class_model(
         user_id,
         modality,
