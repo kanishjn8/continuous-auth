@@ -125,3 +125,19 @@ def test_multiday_corpus_has_expected_distinct_days():
     assert len(days) == 5
     assert len(segments) == 10
     assert all(s.user_id == "alice" for s in segments)
+
+
+def test_multiday_corpus_rolls_over_past_31_days():
+    # collection_day was previously built as f"2026-01-{day_idx+1:02d}",
+    # hardcoding month "01" with no rollover -- num_days > 31 silently
+    # produced invalid calendar strings like "2026-01-35". A longer
+    # synthetic corpus (e.g. for an enrollment-length experiment needing
+    # >31 distinct days) must still get valid, distinct, chronologically
+    # increasing calendar days.
+    profile = SyntheticUserProfile(user_id="alice")
+    segments = generate_multiday_corpus(profile, base_seed=1, num_days=35, segments_per_day=1)
+    days = sorted({s.collection_day for s in segments})
+    assert len(days) == 35
+    assert days[0] == "2026-01-01"
+    assert days[-1] == "2026-02-04"
+    assert days == sorted(days)  # every day string is a valid, orderable ISO date

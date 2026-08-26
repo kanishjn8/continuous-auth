@@ -17,6 +17,7 @@ from ml.training.common import (
 from ml.training.isolation_forest import train_user_modality_isolation_forest, train_user_profile
 from ml.training.model_wrappers import IsolationForestWrapper
 from ml.training.persistence import ArtifactCorruptedError, load_artifact, save_artifact
+from ml.training.single_fused_model import score_single_fused_window, train_user_single_fused_model
 from ml.tests.conftest import generate_user_windows
 
 
@@ -212,6 +213,29 @@ def test_mahalanobis_singular_covariance_does_not_crash():
     assert np.all(np.isfinite(scores))
 
 
+def test_mahalanobis_ridge_must_be_scaled_to_standardized_feature_variance():
+    # min_baseline_windows (20, ml/config/thresholds.yaml) is smaller than
+    # the keyboard feature block (24 dims), so a user trained at exactly the
+    # admission threshold has a rank-deficient empirical covariance -- and
+    # features reach this baseline already standardized (per-feature
+    # variance ~1 via PreprocessingParams), so an additive ridge must be on
+    # that same order to matter. A held-out point's projection onto the
+    # training sample's null directions is real signal (~O(1)), not
+    # floating-point noise, so an under-regularized ridge (the old
+    # default, 1e-6) inflates it by ~1/ridge and dwarfs a properly-scaled
+    # ridge (the current default, 0.1) by orders of magnitude.
+    rng = np.random.default_rng(0)
+    X_train = rng.normal(size=(20, 24))
+    X_test = rng.normal(size=(50, 24))
+
+    tiny_ridge_scores = MahalanobisWrapper(ridge=1e-6).fit(X_train).normality_score(X_test)
+    configured_scores = MahalanobisWrapper(ridge=0.1).fit(X_train).normality_score(X_test)
+
+    assert np.all(np.isfinite(tiny_ridge_scores))
+    assert np.all(np.isfinite(configured_scores))
+    assert np.max(np.abs(tiny_ridge_scores)) > 20 * np.max(np.abs(configured_scores))
+
+
 def test_one_class_svm_baseline_trains_and_scores(ml_config):
     windows = generate_user_windows("u1", seed=1, config=ml_config, duration_minutes=60)
     artifact = train_user_modality_one_class_svm("u1", "keyboard", windows, ml_config)
@@ -269,3 +293,96 @@ def test_load_refuses_on_corrupted_checksum(ml_config, tmp_path):
 def test_load_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_artifact(tmp_path / "does_not_exist.joblib")
+
+
+# --- Single fused-vector comparison model (ADR-006 confirmation criterion) --
+
+
+def _kbd_only_window(ml_config, *, user_id="u1", seed=123, n_keystrokes=20):
+    """Build a window with keyboard activity only (no mouse events at all) --
+    always yields mouse_features=None regardless of gate thresholds, mirroring
+    test_score_window_missing_modality_returns_unavailable_not_fabricated.
+    """
+    from ml.datasets.synthetic import SyntheticUserProfile, generate_keyboard_stream, _SeqCounter
+    from ml.features.extractor import extract_windows
+    from ml.features.schema import Provenance
+
+    profile = SyntheticUserProfile(user_id=user_id)
+    rng = np.random.default_rng(seed)
+    kbd_events = generate_keyboard_stream(profile, rng, n_keystrokes=n_keystrokes, t_start_us=0, seq=_SeqCounter())
+    windows = extract_windows(
+        kbd_events,
+        [],
+        [],
+        user_id=user_id,
+        session_id="s-kbd-only",
+        segment_id="seg-kbd-only",
+        collection_day="2026-01-01",
+        provenance=Provenance.SYNTHETIC,
+        config=ml_config,
+    )
+    return next(w for w in windows if w.mouse_features is None)
+
+
+def test_single_fused_model_trains_on_full_windows_with_concatenated_features(ml_config):
+    windows = generate_user_windows("u1", seed=1, config=ml_config, duration_minutes=60)
+    artifact = train_user_single_fused_model("u1", windows, ml_config)
+
+    assert artifact.model_type == "single_fused_isolation_forest"
+    assert artifact.modality == "combined"
+    assert len(artifact.feature_names) == 24 + 22  # keyboard + mouse block sizes
+    assert artifact.checksum
+
+
+def test_single_fused_model_insufficient_data_when_no_full_windows(ml_config):
+    kbd_only_windows = [_kbd_only_window(ml_config, seed=s) for s in range(30)]
+    with pytest.raises(InsufficientDataError):
+        train_user_single_fused_model("u1", kbd_only_windows, ml_config)
+
+
+def test_score_single_fused_window_full_window_needs_no_imputation(ml_config):
+    windows = generate_user_windows("u1", seed=1, config=ml_config, duration_minutes=60)
+    artifact = train_user_single_fused_model("u1", windows, ml_config)
+
+    result = score_single_fused_window(artifact, windows[0])
+    assert result.available is True
+    assert result.missing_modality is None
+    assert np.isfinite(result.raw_score)
+
+
+def test_score_single_fused_window_imputes_missing_modality_instead_of_refusing(ml_config):
+    # This is the ADR-006-predicted failure mode: unlike the dual-model
+    # design (score_window returns unavailable=False, no fabricated score),
+    # a single fused-vector model has no way to score a partial window
+    # without first inventing a value for the missing modality.
+    windows = generate_user_windows("u1", seed=1, config=ml_config, duration_minutes=60)
+    artifact = train_user_single_fused_model("u1", windows, ml_config)
+
+    kbd_only_window = _kbd_only_window(ml_config, seed=999)
+    result = score_single_fused_window(artifact, kbd_only_window)
+
+    assert result.available is True
+    assert result.missing_modality == "mouse"
+    assert np.isfinite(result.raw_score)
+
+
+def test_score_single_fused_window_both_modalities_missing_returns_unavailable(ml_config):
+    windows = generate_user_windows("u1", seed=1, config=ml_config, duration_minutes=60)
+    artifact = train_user_single_fused_model("u1", windows, ml_config)
+
+    insufficient = windows[0].model_copy(update={"keyboard_features": None, "mouse_features": None})
+    result = score_single_fused_window(artifact, insufficient)
+
+    assert result.available is False
+    assert result.raw_score is None
+    assert result.percentile_score is None
+    assert result.missing_modality is None
+
+
+def test_score_single_fused_window_refuses_on_schema_mismatch(ml_config):
+    windows = generate_user_windows("u1", seed=1, config=ml_config, duration_minutes=60)
+    artifact = train_user_single_fused_model("u1", windows, ml_config)
+
+    tampered = windows[0].model_copy(update={"feature_schema_version": "9.9.9-incompatible"})
+    with pytest.raises(ModelSchemaMismatchError):
+        score_single_fused_window(artifact, tampered)

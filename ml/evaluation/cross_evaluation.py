@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ml.features.schema import FeatureWindow
-from ml.training.common import ModelArtifact, score_window
+from ml.training.common import ModelArtifact, ModelSchemaMismatchError, score_window
 
 
 @dataclass
@@ -31,9 +31,23 @@ class CrossEvalResult:
 
 
 def _modality_scores(artifact: ModelArtifact, windows: list[FeatureWindow]) -> list[float]:
+    """Score every window, excluding any that individually fail to score.
+
+    A schema mismatch propagates (PLAN.md guardrail: "refuse, never
+    silently use" applies to the whole artifact, not just one window) but
+    a non-finite raw score on a single window must not abort scoring for
+    every other window/user pair in a cross-evaluation loop -- that one
+    degenerate window is excluded, the same way an unavailable modality
+    already contributes no row rather than crashing the run.
+    """
     scores = []
     for w in windows:
-        result = score_window(artifact, w)
+        try:
+            result = score_window(artifact, w)
+        except ModelSchemaMismatchError:
+            raise
+        except ValueError:
+            continue
         if result.available:
             scores.append(result.percentile_score)
     return scores

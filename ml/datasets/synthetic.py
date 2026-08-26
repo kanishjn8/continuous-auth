@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 import numpy as np
 
@@ -374,8 +375,9 @@ def generate_multiday_corpus(
 ) -> list[SyntheticSegment]:
     """Generate a deterministic multi-day corpus for one user, for day-disjoint-split fixtures."""
     segments: list[SyntheticSegment] = []
+    base_date = date(2026, 1, 1)
     for day_idx in range(num_days):
-        collection_day = f"2026-01-{day_idx + 1:02d}"
+        collection_day = (base_date + timedelta(days=day_idx)).isoformat()
         for seg_idx in range(segments_per_day):
             seed = base_seed + day_idx * 1000 + seg_idx
             t_start = day_idx * segments_per_day * segment_duration_us + seg_idx * segment_duration_us

@@ -80,6 +80,19 @@ def test_loader_missing_file_raises():
         load_public_keystroke_csv("does_not_exist.csv")
 
 
+def test_loader_rejects_release_before_press(tmp_path):
+    # A KEY_UP timestamped before its own KEY_DOWN is a corrupted/misaligned
+    # row (a sign of a bad export, misaligned columns, etc.) -- the module's
+    # own docstring says malformed data "must fail loudly, not produce a
+    # partial, silently-wrong corpus." Silently clamping this into a
+    # zero-dwell keystroke would quietly bias dwell_mean/dwell_std toward
+    # zero instead of surfacing the bad row.
+    csv_path = tmp_path / "bad3.csv"
+    write_fixture_csv(csv_path, [("u1", 100.0, 40.0, "h")])
+    with pytest.raises(ValueError):
+        load_public_keystroke_csv(csv_path)
+
+
 def test_loaded_stream_feeds_windowing_as_keyboard_only(ml_config, tmp_path):
     csv_path = tmp_path / "fixture.csv"
     rows = []

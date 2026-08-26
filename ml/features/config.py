@@ -79,6 +79,10 @@ def load_config(path: Path | str | None = None) -> MLConfig:
         w = raw["windowing"]
         fc = raw["feature_computation"]
         qg = raw["quality_gate"]
+        pun = raw["per_user_normalization"]
+        isof = raw["isolation_forest"]
+        maha = raw["mahalanobis_baseline"]
+        ocsvm = raw["one_class_svm_baseline"]
     except KeyError as e:
         raise ConfigError(f"missing required config section: {e}") from e
 
@@ -97,6 +101,21 @@ def load_config(path: Path | str | None = None) -> MLConfig:
         _require_positive(fc[key], f"feature_computation.{key}")
     for key in ("min_keystrokes", "min_mouse_samples"):
         _require_positive(qg[key], f"quality_gate.{key}")
+
+    # Read (deep) via config.raw[...] by ml/training and ml/baselines, but
+    # never previously validated here -- a missing/malformed key surfaced as
+    # a raw KeyError/TypeError mid-training instead of at config load, which
+    # contradicts this function's own "invalid config fails startup"
+    # contract. Only the fields that must unconditionally be positive
+    # numbers are checked; fields with a valid non-numeric sentinel (e.g.
+    # isolation_forest.contamination/max_samples accept "auto",
+    # one_class_svm_baseline.kernel/gamma are free-form sklearn strings)
+    # are left to sklearn's own validation, since replicating that here
+    # would drift out of sync with sklearn's accepted values.
+    _require_positive(pun["min_baseline_windows"], "per_user_normalization.min_baseline_windows")
+    _require_positive(isof["n_estimators"], "isolation_forest.n_estimators")
+    _require_positive(maha["ridge"], "mahalanobis_baseline.ridge")
+    _require_positive(ocsvm["nu"], "one_class_svm_baseline.nu")
 
     return MLConfig(
         windowing=WindowingConfig(

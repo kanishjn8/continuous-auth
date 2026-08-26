@@ -66,6 +66,21 @@ def test_click_duration_exact():
     assert math.isclose(result["click_rate"], 500.0, rel_tol=1e-9)  # 1 click / 0.12s -> 500/min
 
 
+def test_straightness_ratio_is_zero_for_zero_path_length_segment():
+    # Every point coincides (pure jitter, no net movement): straight_dist
+    # and seg_path_length are both 0, so the ratio is undefined -- must
+    # fall back to 0.0 like every other degenerate statistic in this
+    # module, not 1.0 ("perfectly straight"), which would be backwards for
+    # a segment that never actually moved.
+    events = [
+        mouse_move(0, 0, 50.0, 50.0),
+        mouse_move(1, 100_000, 50.0, 50.0),
+        mouse_move(2, 200_000, 50.0, 50.0),
+    ]
+    result = compute_mouse_features(events, window_duration_us=200_000, **DEFAULT_KW)
+    assert result["straightness_ratio"] == 0.0
+
+
 def test_double_click_interval_detected_within_threshold():
     events = [
         mouse_click(0, 0, "BUTTON_DOWN"),
@@ -119,6 +134,20 @@ def test_move_to_click_ratio():
     ]
     result = compute_mouse_features(events, window_duration_us=350_000, **DEFAULT_KW)
     assert result["move_to_click_ratio"] == 3.0
+
+
+def test_move_to_click_ratio_is_zero_when_no_clicks():
+    # click_count == 0 makes the ratio undefined (would-be division by
+    # zero) -- must fall back to 0.0 like every other degenerate statistic
+    # in this module, not the raw (unbounded, scale-inconsistent) move
+    # count.
+    events = [
+        mouse_move(0, 0, 0.0, 0.0),
+        mouse_move(1, 100_000, 10.0, 0.0),
+        mouse_move(2, 200_000, 20.0, 0.0),
+    ]
+    result = compute_mouse_features(events, window_duration_us=200_000, **DEFAULT_KW)
+    assert result["move_to_click_ratio"] == 0.0
 
 
 def test_resolution_normalization_scales_velocity():

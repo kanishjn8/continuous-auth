@@ -173,7 +173,7 @@ def compute_mouse_features(
         micro_pause_counts.append(pauses)
 
         straight_dist = math.hypot((seg[-1].x - seg[0].x) * sx, (seg[-1].y - seg[0].y) * sy)
-        straightness_ratios.append(straight_dist / seg_path_length if seg_path_length > 0 else 1.0)
+        straightness_ratios.append(straight_dist / seg_path_length if seg_path_length > 0 else 0.0)
 
     # Clicks: match BUTTON_DOWN -> next BUTTON_UP of the same button (FIFO).
     from collections import deque
@@ -201,7 +201,7 @@ def compute_mouse_features(
 
     click_count = len(click_down_events)
     click_rate = (click_count / duration_s * 60.0) if duration_s > 0 else 0.0
-    move_to_click_ratio = (len(moves) / click_count) if click_count > 0 else float(len(moves))
+    move_to_click_ratio = (len(moves) / click_count) if click_count > 0 else 0.0
 
     scrolls = [e for e in ordered if e.type == "SCROLL"]
     scroll_rate = (len(scrolls) / duration_s * 60.0) if duration_s > 0 else 0.0

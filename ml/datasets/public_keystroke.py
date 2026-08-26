@@ -151,6 +151,11 @@ def load_public_keystroke_csv(
                 release_us = float(row[release_time_col]) * time_unit_to_us
             except (TypeError, ValueError) as e:
                 raise ValueError(f"non-numeric timestamp in row for user {user_id!r}: {e}") from e
+            if release_us < press_us:
+                raise ValueError(
+                    f"row for user {user_id!r} has release_time ({release_us}us) before "
+                    f"press_time ({press_us}us) -- malformed row, refusing to silently clamp it"
+                )
             key_class = classify_char_to_key_class(row[key_col])
             per_user_rows[user_id].append((press_us, release_us, key_class))  # type: ignore[arg-type]
 
@@ -177,7 +182,7 @@ def load_public_keystroke_csv(
             events.append(
                 KeyboardEvent(
                     type="KEY_UP",
-                    t_capture_us=max(int(release_us), int(press_us)),
+                    t_capture_us=int(release_us),
                     key_class=key_class,
                     is_repeat=False,
                     device_class=DeviceClass.UNKNOWN,

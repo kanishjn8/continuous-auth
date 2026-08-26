@@ -13,6 +13,7 @@ import enum
 import typing
 
 import pydantic
+import pytest
 
 from ml.features.schema import (
     ContextBlock,
@@ -37,13 +38,27 @@ _ALLOWED_IDENTIFIER_FIELDS = {
 
 
 def _is_closed_string_type(annotation: object) -> bool:
+    """True iff ``annotation`` can never carry an open/free-form string.
+
+    Recurses into every type argument (Union/Optional branches, dict
+    key+value types, list/tuple element types) and requires ALL of them to
+    be closed -- a container or union is only as safe as its most
+    permissive member, so e.g. ``dict[Enum, float]`` is closed but
+    ``list[str]`` and ``Optional[str]`` are not: both contain a bare
+    ``str`` branch and must be rejected, not blanket-allowed just because
+    the outer shape is a dict/list/tuple/Union.
+    """
+    if annotation is type(None):
+        return True
+    if annotation in (int, float, bool):
+        return True
     if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
         return True
     origin = typing.get_origin(annotation)
     if origin is typing.Literal:
         return True
     if origin is not None:
-        return any(_is_closed_string_type(a) for a in typing.get_args(annotation))
+        return all(_is_closed_string_type(a) for a in typing.get_args(annotation))
     return False
 
 
@@ -54,14 +69,10 @@ def _assert_no_open_string_fields(model: type[pydantic.BaseModel]) -> None:
         ann = field.annotation
         if ann is str:
             raise AssertionError(f"{model.__name__}.{name} is an open str field — forbidden by guardrail")
-        if ann in (int, float, bool):
-            continue
         if not _is_closed_string_type(ann):
-            # dict[Enum, float] etc. are fine as long as the *value* side
-            # cannot carry text; spot-check known container fields below.
-            origin = typing.get_origin(ann)
-            if origin in (dict, list, tuple) or ann is type(None):
-                continue
+            raise AssertionError(
+                f"{model.__name__}.{name} (annotation={ann!r}) is not a provably content-free type"
+            )
 
 
 def test_keyboard_event_has_no_open_content_fields():
@@ -111,3 +122,38 @@ def test_mouse_features_dict_never_contains_context_keys():
 
     context_keys = set(ContextBlock.model_fields.keys())
     assert context_keys.isdisjoint(MOUSE_FEATURE_NAMES)
+
+
+# --- Guardrail-detector regression tests -----------------------------------
+#
+# These exercise the detector itself (``_assert_no_open_string_fields``)
+# against deliberately-unsafe dummy models -- proving the guardrail would
+# actually catch an open-content field if one were ever added to a real
+# event/window model, not just that today's real models happen to pass.
+
+
+class _DummyOptionalStr(pydantic.BaseModel):
+    note: typing.Optional[str] = None
+
+
+class _DummyListStr(pydantic.BaseModel):
+    tags: list[str] = pydantic.Field(default_factory=list)
+
+
+class _DummyDictStrValue(pydantic.BaseModel):
+    labels: dict[str, str] = pydantic.Field(default_factory=dict)
+
+
+def test_guardrail_detector_rejects_optional_str_field():
+    with pytest.raises(AssertionError):
+        _assert_no_open_string_fields(_DummyOptionalStr)
+
+
+def test_guardrail_detector_rejects_list_of_str_field():
+    with pytest.raises(AssertionError):
+        _assert_no_open_string_fields(_DummyListStr)
+
+
+def test_guardrail_detector_rejects_dict_with_str_value_field():
+    with pytest.raises(AssertionError):
+        _assert_no_open_string_fields(_DummyDictStrValue)

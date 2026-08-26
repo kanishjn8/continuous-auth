@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 from ml.evaluation.cross_evaluation import CrossEvalResult
 from ml.features.schema import FeatureWindow
-from ml.training.common import ModelArtifact, score_window
+from ml.training.common import ModelArtifact, ModelSchemaMismatchError, score_window
 
 
 def fuse_percentile_scores(
@@ -89,8 +89,13 @@ def _fused_scores(
 ) -> list[float]:
     scores: list[float] = []
     for w in windows:
-        kbd_result = score_window(kbd_artifact, w)
-        mouse_result = score_window(mouse_artifact, w)
+        try:
+            kbd_result = score_window(kbd_artifact, w)
+            mouse_result = score_window(mouse_artifact, w)
+        except ModelSchemaMismatchError:
+            raise
+        except ValueError:
+            continue
         fused = fuse_percentile_scores(
             kbd_result.percentile_score if kbd_result.available else None,
             mouse_result.percentile_score if mouse_result.available else None,

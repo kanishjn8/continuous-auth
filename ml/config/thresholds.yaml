@@ -64,7 +64,18 @@ isolation_forest:
 mahalanobis_baseline:
   # Ridge added to the covariance diagonal before inversion, for numerical
   # stability when per-user sample size is close to the feature dimension.
-  ridge: 1.0e-6
+  # Features reach this baseline already standardized (per-feature
+  # variance ~1, see PreprocessingParams), so the ridge must be on that
+  # same order to matter: per_user_normalization.min_baseline_windows (20)
+  # is smaller than both feature blocks' dimensionality (24 keyboard, 22
+  # mouse), so a user trained at the minimum admitted window count has a
+  # rank-deficient empirical covariance with several exactly-zero
+  # eigenvalues. A ridge many orders of magnitude below the ~1 feature
+  # scale (e.g. 1e-6) leaves those null directions dominating the inverse
+  # (pinv turns a ~0 eigenvalue + 1e-6 into a ~1e6 contribution), so the
+  # Mahalanobis distance becomes numerical noise rather than signal
+  # exactly at the admission boundary.
+  ridge: 0.1
 
 one_class_svm_baseline:
   kernel: "rbf"

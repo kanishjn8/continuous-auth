@@ -25,7 +25,13 @@ from ml.features.schema import FeatureWindow, Provenance
 
 FEATURE_SCHEMA_VERSION = "1.0.0-fixture"  # must match FeatureWindow.feature_schema_version
 
-Modality = Literal["keyboard", "mouse"]
+# "combined" is the ADR-006 confirmation-criterion comparison baseline: a
+# single model trained on the concatenation of the keyboard and mouse
+# feature blocks (ml/training/single_fused_model.py), evaluated directly
+# against the production dual-model score-fusion design. It is not a third
+# production modality.
+Modality = Literal["keyboard", "mouse", "combined"]
+COMBINED_FEATURE_NAMES: tuple[str, ...] = KEYBOARD_FEATURE_NAMES + MOUSE_FEATURE_NAMES
 
 
 class ModelSchemaMismatchError(ValueError):
@@ -47,7 +53,13 @@ class InsufficientDataError(ValueError):
 
 
 def feature_names_for(modality: Modality) -> tuple[str, ...]:
-    return KEYBOARD_FEATURE_NAMES if modality == "keyboard" else MOUSE_FEATURE_NAMES
+    if modality == "keyboard":
+        return KEYBOARD_FEATURE_NAMES
+    if modality == "mouse":
+        return MOUSE_FEATURE_NAMES
+    if modality == "combined":
+        return COMBINED_FEATURE_NAMES
+    raise ValueError(f"unknown modality: {modality!r}")
 
 
 def build_feature_matrix(
@@ -60,14 +72,25 @@ def build_feature_matrix(
     those whose ``quality_label`` made this modality available -- ADR-005 /
     ADR-006: an unavailable modality contributes no row, it is never
     imputed).
+
+    For ``modality="combined"`` (the ADR-006 single fused-vector comparison
+    baseline), a row requires *both* blocks to be present -- there is no
+    vector to concatenate from a window missing one modality, so such
+    windows are excluded from training exactly like an unavailable
+    single modality is excluded above.
     """
     names = feature_names_for(modality)
     rows: list[list[float]] = []
     used: list[FeatureWindow] = []
     for w in windows:
-        block = w.keyboard_features if modality == "keyboard" else w.mouse_features
-        if block is None:
-            continue
+        if modality == "combined":
+            if w.keyboard_features is None or w.mouse_features is None:
+                continue
+            block = {**w.keyboard_features, **w.mouse_features}
+        else:
+            block = w.keyboard_features if modality == "keyboard" else w.mouse_features
+            if block is None:
+                continue
         rows.append([block[name] for name in names])
         used.append(w)
     if not rows:
