@@ -32,3 +32,7 @@ for headline evaluation.
 `ingestion.development.yaml` supplies the bounded frame size, memory-only raw-event ring,
 and configurable ADR-007 idle split used by T-007 local development. It contains no
 production risk or enforcement thresholds.
+
+`risk.development.yaml` exists only to exercise T-013 with synthetic fixtures. Its O3,
+O7, O8, and O9 values are explicitly provisional; it is not a production `thresholds.yaml`
+and does not resolve the Plan's open experiment/human-approval items.

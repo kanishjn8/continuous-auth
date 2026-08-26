@@ -160,9 +160,7 @@ class ModelScoringService:
                 f"window user {window.user_id!r} does not match profile "
                 f"{self.profile.user_id!r}"
             )
-        keyboard, keyboard_issue = self._score_modality(
-            window, "keyboard", self.profile.keyboard
-        )
+        keyboard, keyboard_issue = self._score_modality(window, "keyboard", self.profile.keyboard)
         mouse, mouse_issue = self._score_modality(window, "mouse", self.profile.mouse)
         score = ScoreResult(
             schema_version=PROTOCOL_VERSION,
@@ -177,7 +175,5 @@ class ModelScoringService:
         )
         return ScoringOutcome(
             score=score,
-            issues=tuple(
-                issue for issue in (keyboard_issue, mouse_issue) if issue is not None
-            ),
+            issues=tuple(issue for issue in (keyboard_issue, mouse_issue) if issue is not None),
         )
