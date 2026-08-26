@@ -24,7 +24,7 @@ overwhelmingly common case of one key of a given class held at a time.
 from __future__ import annotations
 
 from collections import deque
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -33,8 +33,8 @@ from ml.features.schema import (
     HOME_ROW_CLASSES,
     KEY_CLASS_HAND,
     KEY_CLASS_ROW,
-    KeyClass,
     KeyboardEvent,
+    KeyClass,
 )
 
 # The full, ordered set of keyboard feature names this module produces.

@@ -5,7 +5,7 @@ ASSUMPTION -- resolution normalisation input: PLAN.md Section 7.2's
 expected to arrive via device/context metadata once the real collector
 (T-005) exists. Until then, callers may pass the device's actual
 ``(screen_width_px, screen_height_px)``; this module scales coordinates to
-the configured reference resolution (``ml/config/thresholds.yaml``) before
+the configured reference resolution (``config/ml.development.yaml``) before
 computing spatial features, so that features stay comparable across
 devices. If no resolution is supplied, no scaling is applied (assumed
 already at reference resolution) -- this is flagged, not silent, via the
@@ -18,7 +18,7 @@ NaN/inf, no silently-fabricated values).
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -58,13 +58,11 @@ def _std(values: Sequence[float]) -> float:
     return float(np.std(values)) if len(values) > 1 else 0.0
 
 
-def _segment_moves(
-    moves: Sequence[MouseEvent], gap_threshold_us: int
-) -> list[list[MouseEvent]]:
+def _segment_moves(moves: Sequence[MouseEvent], gap_threshold_us: int) -> list[list[MouseEvent]]:
     if not moves:
         return []
     segments: list[list[MouseEvent]] = [[moves[0]]]
-    for prev, cur in zip(moves, moves[1:]):
+    for prev, cur in zip(moves, moves[1:], strict=False):
         if cur.t_capture_us - prev.t_capture_us > gap_threshold_us:
             segments.append([cur])
         else:
@@ -125,7 +123,7 @@ def compute_mouse_features(
         seg_velocities: list[tuple[float, float, float]] = []  # (vx, vy, dt_s)
         seg_path_length = 0.0
         prev_angle: float | None = None
-        for a, b in zip(seg, seg[1:]):
+        for a, b in zip(seg, seg[1:], strict=False):
             dt_us = b.t_capture_us - a.t_capture_us
             if dt_us <= 0:
                 continue
@@ -193,7 +191,7 @@ def compute_mouse_features(
                     click_durations.append(ev.t_capture_us - down_t)
 
     double_click_intervals: list[int] = []
-    for a, b in zip(click_down_events, click_down_events[1:]):
+    for a, b in zip(click_down_events, click_down_events[1:], strict=False):
         if a.button == b.button:
             gap = b.t_capture_us - a.t_capture_us
             if 0 <= gap <= double_click_max_gap_us:
@@ -208,7 +206,7 @@ def compute_mouse_features(
     scroll_bursts: list[int] = []
     if scrolls:
         current = 1
-        for a, b in zip(scrolls, scrolls[1:]):
+        for a, b in zip(scrolls, scrolls[1:], strict=False):
             if b.t_capture_us - a.t_capture_us <= scroll_burst_gap_us:
                 current += 1
             else:
@@ -227,7 +225,9 @@ def compute_mouse_features(
         "straightness_ratio": _mean(straightness_ratios),
         "curvature_mean": _mean(curvatures),
         "curvature_std": _std(curvatures),
-        "direction_change_rate": (direction_changes / total_path_length) if total_path_length > 0 else 0.0,
+        "direction_change_rate": (
+            (direction_changes / total_path_length) if total_path_length > 0 else 0.0
+        ),
         "angular_velocity_mean": _mean(angular_velocities),
         "segment_duration_mean": _mean(segment_durations),
         "segment_duration_std": _std(segment_durations),

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import yaml
 import pytest
+import yaml
 
 from ml.features.config import ConfigError, load_config
 
@@ -19,7 +19,12 @@ _BASE = {
     },
     "quality_gate": {"min_keystrokes": 5, "min_mouse_samples": 10},
     "per_user_normalization": {"min_baseline_windows": 20},
-    "isolation_forest": {"n_estimators": 100, "contamination": "auto", "max_samples": "auto", "random_state": 42},
+    "isolation_forest": {
+        "n_estimators": 100,
+        "contamination": "auto",
+        "max_samples": "auto",
+        "random_state": 42,
+    },
     "mahalanobis_baseline": {"ridge": 0.1},
     "one_class_svm_baseline": {"kernel": "rbf", "nu": 0.1, "gamma": "scale"},
 }
@@ -51,7 +56,12 @@ def test_load_config_still_accepts_auto_sentinel_fields(tmp_path):
 
 @pytest.mark.parametrize(
     "remove_section",
-    ["per_user_normalization", "isolation_forest", "mahalanobis_baseline", "one_class_svm_baseline"],
+    [
+        "per_user_normalization",
+        "isolation_forest",
+        "mahalanobis_baseline",
+        "one_class_svm_baseline",
+    ],
 )
 def test_load_config_rejects_missing_baseline_sections(tmp_path, remove_section):
     # These sections are read via config.raw[...] deep inside
@@ -65,7 +75,9 @@ def test_load_config_rejects_missing_baseline_sections(tmp_path, remove_section)
 
 def test_load_config_rejects_non_positive_min_baseline_windows(tmp_path):
     with pytest.raises(ConfigError):
-        load_config(_write(tmp_path, overrides={"per_user_normalization": {"min_baseline_windows": 0}}))
+        load_config(
+            _write(tmp_path, overrides={"per_user_normalization": {"min_baseline_windows": 0}})
+        )
 
 
 def test_load_config_rejects_non_positive_mahalanobis_ridge(tmp_path):

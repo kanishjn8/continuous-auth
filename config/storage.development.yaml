@@ -1,0 +1,24 @@
+# Local synthetic-data profile for development and automated checks only.
+# It is structurally rejected for PILOT or EVALUATION use.
+config_version: storage-development-1
+protocol_version: 1.0.0
+
+storage:
+  environment: DEVELOPMENT
+  data_policy: SYNTHETIC_ONLY
+  root_directory: "${LOCALAPPDATA}/ContinuousAuthentication/Development"
+  database_filename: continuous-auth.db
+  audit_directory_name: audit
+  busy_timeout_ms: 5000
+
+# These are local engineering limits for disposable synthetic data, not approved
+# pilot/evaluation policy and not claimed research thresholds.
+retention:
+  feature_window_days: 7
+  score_days: 7
+  audit_compress_after_days: 1
+  audit_delete_after_days: 7
+  raw_debug_capture_enabled: false
+  pilot_mode: false
+
+

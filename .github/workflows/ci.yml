@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  contracts-and-guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install ".[dev]"
+      - run: python protocol/codegen/generate.py --check
+      - run: python tools/guardrails/check.py
+      - run: python -m pytest protocol/tests tools/guardrails/tests
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install ".[backend,dev]"
+      - run: ruff check backend ml protocol/codegen protocol/tests tools
+      - run: black --check backend ml protocol/codegen protocol/tests tools
+      - run: mypy backend ml protocol/codegen tools/guardrails
+      - run: python -m pytest
+
+  native-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S collector -B build/collector -DBUILD_TESTING=ON
+      - run: cmake --build build/collector --config Release
+      - run: ctest --test-dir build/collector -C Release --output-on-failure
+
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+

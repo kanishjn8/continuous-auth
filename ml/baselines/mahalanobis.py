@@ -4,13 +4,13 @@ feature centroid (PLAN.md Section 10.4, required baseline #1).
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
 from ml.features.config import MLConfig
 from ml.features.schema import FeatureWindow
-from ml.training.common import ModelArtifact, Modality, train_one_class_model
+from ml.training.common import Modality, ModelArtifact, train_one_class_model
 
 
 class MahalanobisWrapper:
@@ -21,7 +21,7 @@ class MahalanobisWrapper:
         self.mean_: np.ndarray | None = None
         self.inv_cov_: np.ndarray | None = None
 
-    def fit(self, X: np.ndarray) -> "MahalanobisWrapper":
+    def fit(self, X: np.ndarray) -> MahalanobisWrapper:
         self.mean_ = X.mean(axis=0)
         cov = np.atleast_2d(np.cov(X, rowvar=False))
         # Ridge regularization: per-user training sets can be small relative
@@ -38,7 +38,7 @@ class MahalanobisWrapper:
         diff = X - self.mean_
         dist_sq = np.einsum("ij,jk,ik->i", diff, self.inv_cov_, diff)
         distance = np.sqrt(np.clip(dist_sq, 0.0, None))
-        return -distance
+        return np.asarray(-distance, dtype=float)
 
 
 def train_user_modality_mahalanobis(

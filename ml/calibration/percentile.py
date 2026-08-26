@@ -28,7 +28,7 @@ class PercentileCalibrator:
     reference_scores: list[float] = field(default_factory=list)
 
     @classmethod
-    def fit(cls, scores: np.ndarray) -> "PercentileCalibrator":
+    def fit(cls, scores: np.ndarray) -> PercentileCalibrator:
         if len(scores) == 0:
             raise ValueError("cannot fit a percentile calibrator on zero scores")
         return cls(reference_scores=sorted(float(s) for s in scores))

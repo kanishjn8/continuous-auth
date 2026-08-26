@@ -33,7 +33,7 @@ _ALLOWED_IDENTIFIER_FIELDS = {
     "segment_id",
     "window_id",
     "collection_day",
-    "feature_schema_version",
+    "schema_version",
 }
 
 
@@ -68,7 +68,9 @@ def _assert_no_open_string_fields(model: type[pydantic.BaseModel]) -> None:
             continue
         ann = field.annotation
         if ann is str:
-            raise AssertionError(f"{model.__name__}.{name} is an open str field — forbidden by guardrail")
+            raise AssertionError(
+                f"{model.__name__}.{name} is an open str field — forbidden by guardrail"
+            )
         if not _is_closed_string_type(ann):
             raise AssertionError(
                 f"{model.__name__}.{name} (annotation={ann!r}) is not a provably content-free type"
@@ -91,12 +93,14 @@ def test_heartbeat_has_no_open_content_fields():
     _assert_no_open_string_fields(Heartbeat)
 
 
-def test_context_block_category_fractions_keyed_by_enum_not_string():
-    ann = ContextBlock.model_fields["category_fractions"].annotation
-    args = typing.get_args(ann)
-    assert args, "category_fractions must be a parameterized dict[AppCategory, float]"
-    key_type = args[0]
-    assert isinstance(key_type, type) and issubclass(key_type, enum.Enum)
+def test_context_block_rejects_unknown_category_keys():
+    with pytest.raises(pydantic.ValidationError, match="unknown application categories"):
+        ContextBlock(
+            dominant_category="UNKNOWN",
+            category_fractions={"possible-user-content": 1.0},
+            app_switch_rate=0.0,
+            device_class="UNKNOWN",
+        )
 
 
 def test_feature_window_forbids_extra_fields():
@@ -133,7 +137,7 @@ def test_mouse_features_dict_never_contains_context_keys():
 
 
 class _DummyOptionalStr(pydantic.BaseModel):
-    note: typing.Optional[str] = None
+    note: str | None = None
 
 
 class _DummyListStr(pydantic.BaseModel):

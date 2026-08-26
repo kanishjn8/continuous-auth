@@ -4,11 +4,11 @@ required baseline #2).
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from ml.features.config import MLConfig
 from ml.features.schema import FeatureWindow
-from ml.training.common import ModelArtifact, Modality, train_one_class_model
+from ml.training.common import Modality, ModelArtifact, train_one_class_model
 from ml.training.model_wrappers import OneClassSVMWrapper
 
 

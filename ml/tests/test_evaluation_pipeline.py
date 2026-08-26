@@ -4,7 +4,11 @@ import numpy as np
 import pytest
 
 from ml.calibration.percentile import PercentileCalibrator
-from ml.evaluation.cross_evaluation import _modality_scores, pairwise_far_matrix, zero_effort_cross_evaluation
+from ml.evaluation.cross_evaluation import (
+    _modality_scores,
+    pairwise_far_matrix,
+    zero_effort_cross_evaluation,
+)
 from ml.evaluation.fusion import fuse_percentile_scores, fused_cross_evaluation
 from ml.evaluation.metrics import compute_eer
 from ml.evaluation.pipeline import (
@@ -13,20 +17,42 @@ from ml.evaluation.pipeline import (
     run_fusion_vs_single_model_comparison,
 )
 from ml.evaluation.splitting import day_disjoint_split, distinct_days
-from ml.features.schema import FeatureWindow, Provenance, QualityLabel
+from ml.features.keyboard import KEYBOARD_FEATURE_NAMES
+from ml.features.schema import (
+    FEATURE_SCHEMA_VERSION,
+    AppCategory,
+    ContextBlock,
+    DeviceClass,
+    FeatureWindow,
+    KeyboardFeatures,
+    Provenance,
+    QualityLabel,
+)
+from ml.tests.conftest import generate_multiday_user_windows
 from ml.training.common import ModelArtifact, ModelSchemaMismatchError, PreprocessingParams
 from ml.training.isolation_forest import train_user_modality_isolation_forest
-from ml.tests.conftest import generate_multiday_user_windows
 
 
 def _two_user_corpus(ml_config, num_days=6, segment_minutes=15):
     alice = generate_multiday_user_windows(
-        "alice", 1, ml_config, num_days=num_days, segments_per_day=1, segment_minutes=segment_minutes,
-        mean_dd_latency_us=150_000.0, std_dd_latency_us=15_000.0,
+        "alice",
+        1,
+        ml_config,
+        num_days=num_days,
+        segments_per_day=1,
+        segment_minutes=segment_minutes,
+        mean_dd_latency_us=150_000.0,
+        std_dd_latency_us=15_000.0,
     )
     bob = generate_multiday_user_windows(
-        "bob", 2, ml_config, num_days=num_days, segments_per_day=1, segment_minutes=segment_minutes,
-        mean_dd_latency_us=500_000.0, std_dd_latency_us=15_000.0,
+        "bob",
+        2,
+        ml_config,
+        num_days=num_days,
+        segments_per_day=1,
+        segment_minutes=segment_minutes,
+        mean_dd_latency_us=500_000.0,
+        std_dd_latency_us=15_000.0,
     )
     return {"alice": alice, "bob": bob}
 
@@ -42,7 +68,9 @@ def test_zero_effort_cross_evaluation_no_training_data_crosses_users(ml_config):
     test_windows = {}
     for user_id, windows in corpus.items():
         split = day_disjoint_split(windows, test_days=test_days[user_id])
-        artifacts[user_id] = train_user_modality_isolation_forest(user_id, "keyboard", split.train, ml_config)
+        artifacts[user_id] = train_user_modality_isolation_forest(
+            user_id, "keyboard", split.train, ml_config
+        )
         test_windows[user_id] = split.test
 
     results = zero_effort_cross_evaluation(artifacts, test_windows)
@@ -60,7 +88,9 @@ def test_cross_evaluation_separates_distinctly_different_typists(ml_config):
     test_windows = {}
     for user_id, windows in corpus.items():
         split = day_disjoint_split(windows, test_days=test_days[user_id])
-        artifacts[user_id] = train_user_modality_isolation_forest(user_id, "keyboard", split.train, ml_config)
+        artifacts[user_id] = train_user_modality_isolation_forest(
+            user_id, "keyboard", split.train, ml_config
+        )
         test_windows[user_id] = split.test
 
     results = zero_effort_cross_evaluation(artifacts, test_windows)
@@ -78,7 +108,9 @@ def test_pairwise_far_matrix_shape(ml_config):
     test_windows = {}
     for user_id, windows in corpus.items():
         split = day_disjoint_split(windows, test_days=test_days[user_id])
-        artifacts[user_id] = train_user_modality_isolation_forest(user_id, "keyboard", split.train, ml_config)
+        artifacts[user_id] = train_user_modality_isolation_forest(
+            user_id, "keyboard", split.train, ml_config
+        )
         test_windows[user_id] = split.test
 
     results = zero_effort_cross_evaluation(artifacts, test_windows)
@@ -100,33 +132,40 @@ class _ScriptedModel:
         return np.array([v])
 
 
-def _fake_window(window_id, *, feature_schema_version="1.0.0-fixture"):
-    return FeatureWindow(
+def _fake_window(window_id, *, feature_schema_version=FEATURE_SCHEMA_VERSION):
+    window = FeatureWindow(
         user_id="u1",
         session_id="s1",
         segment_id="seg1",
         window_id=window_id,
         t_start_us=0,
         t_end_us=1000,
-        quality_label=QualityLabel.FULL,
+        quality_label=QualityLabel.KBD_ONLY,
         key_event_count=10,
         mouse_event_count=0,
         collection_day="2026-01-01",
         provenance=Provenance.SYNTHETIC,
-        feature_schema_version=feature_schema_version,
-        keyboard_features={"f1": 0.1, "f2": 0.2},
+        keyboard_features=KeyboardFeatures(**{name: 0.0 for name in KEYBOARD_FEATURE_NAMES}),
         mouse_features=None,
-        context=None,
+        context=ContextBlock(
+            dominant_category=AppCategory.UNKNOWN,
+            category_fractions={AppCategory.UNKNOWN.value: 1.0},
+            app_switch_rate=0.0,
+            device_class=DeviceClass.UNKNOWN,
+        ),
     )
+    if feature_schema_version != FEATURE_SCHEMA_VERSION:
+        return window.model_copy(update={"schema_version": feature_schema_version})
+    return window
 
 
-def _fake_artifact(model, *, feature_schema_version="1.0.0-fixture"):
+def _fake_artifact(model, *, feature_schema_version=FEATURE_SCHEMA_VERSION):
     return ModelArtifact(
         user_id="u1",
         modality="keyboard",
         model_type="fake",
         feature_schema_version=feature_schema_version,
-        feature_names=["f1", "f2"],
+        feature_names=list(KEYBOARD_FEATURE_NAMES[:2]),
         training_data_date_range=("2026-01-01", "2026-01-01"),
         provenance_mix={},
         hyperparameters={},
@@ -176,7 +215,9 @@ def test_fuse_percentile_scores_rejects_zero_total_weight():
 
 
 def test_fused_cross_evaluation_only_includes_users_with_both_modalities(ml_config):
-    windows = generate_multiday_user_windows("u1", 1, ml_config, num_days=4, segments_per_day=1, segment_minutes=20)
+    windows = generate_multiday_user_windows(
+        "u1", 1, ml_config, num_days=4, segments_per_day=1, segment_minutes=20
+    )
     days = distinct_days(windows)
     split = day_disjoint_split(windows, test_days=[days[-1]])
     kbd_artifact = train_user_modality_isolation_forest("u1", "keyboard", split.train, ml_config)
@@ -190,7 +231,9 @@ def test_fused_cross_evaluation_only_includes_users_with_both_modalities(ml_conf
 
 
 def test_fused_cross_evaluation_excludes_user_missing_one_modality(ml_config):
-    windows = generate_multiday_user_windows("u1", 1, ml_config, num_days=4, segments_per_day=1, segment_minutes=20)
+    windows = generate_multiday_user_windows(
+        "u1", 1, ml_config, num_days=4, segments_per_day=1, segment_minutes=20
+    )
     days = distinct_days(windows)
     split = day_disjoint_split(windows, test_days=[days[-1]])
     kbd_artifact = train_user_modality_isolation_forest("u1", "keyboard", split.train, ml_config)
@@ -243,8 +286,14 @@ def test_run_baseline_comparison_excludes_user_with_bad_test_day_instead_of_cras
     # for an unrelated reason that would mask this regression).
     corpus = _two_user_corpus(ml_config)
     corpus["carol"] = generate_multiday_user_windows(
-        "carol", 3, ml_config, num_days=6, segments_per_day=1, segment_minutes=15,
-        mean_dd_latency_us=300_000.0, std_dd_latency_us=15_000.0,
+        "carol",
+        3,
+        ml_config,
+        num_days=6,
+        segments_per_day=1,
+        segment_minutes=15,
+        mean_dd_latency_us=300_000.0,
+        std_dd_latency_us=15_000.0,
     )
     test_days = {u: [distinct_days(w)[-1]] for u, w in corpus.items()}
     test_days["alice"] = ["2099-01-01"]
@@ -259,18 +308,22 @@ def test_run_baseline_comparison_excludes_user_with_bad_test_day_instead_of_cras
 
 
 def test_enrollment_length_experiment_reports_all_requested_lengths(ml_config):
-    windows = generate_multiday_user_windows("u1", 1, ml_config, num_days=6, segments_per_day=1, segment_minutes=15)
+    windows = generate_multiday_user_windows(
+        "u1", 1, ml_config, num_days=6, segments_per_day=1, segment_minutes=15
+    )
     days = distinct_days(windows)
     result = run_enrollment_length_experiment(
         "u1", "keyboard", windows, day_lengths=[1, 2, 3], holdout_days=[days[-1]], config=ml_config
     )
     assert set(result.keys()) == {1, 2, 3}
-    for n_days, entry in result.items():
+    for _n_days, entry in result.items():
         assert entry["status"] in ("ok", "insufficient_data")
 
 
 def test_enrollment_length_experiment_more_days_gives_more_training_windows(ml_config):
-    windows = generate_multiday_user_windows("u1", 1, ml_config, num_days=6, segments_per_day=1, segment_minutes=15)
+    windows = generate_multiday_user_windows(
+        "u1", 1, ml_config, num_days=6, segments_per_day=1, segment_minutes=15
+    )
     days = distinct_days(windows)
     result = run_enrollment_length_experiment(
         "u1", "keyboard", windows, day_lengths=[1, 3], holdout_days=[days[-1]], config=ml_config
@@ -308,10 +361,19 @@ def test_run_fusion_vs_single_model_comparison_runs_both_arms_against_real_artif
 
     result = run_fusion_vs_single_model_comparison(corpus, test_days, ml_config)
 
-    for arm in (result.dual_model_fusion, result.single_fused_model, result.keyboard_only, result.mouse_only):
+    for arm in (
+        result.dual_model_fusion,
+        result.single_fused_model,
+        result.keyboard_only,
+        result.mouse_only,
+    ):
         assert arm.per_user_eer, f"{arm.label} produced no per-user EER results"
         assert arm.aggregate["mean"] >= 0.0
-    assert "alice" in result.kbd_artifacts and "alice" in result.mouse_artifacts and "alice" in result.single_artifacts
+    assert (
+        "alice" in result.kbd_artifacts
+        and "alice" in result.mouse_artifacts
+        and "alice" in result.single_artifacts
+    )
     assert result.single_artifacts["alice"].model_type == "single_fused_isolation_forest"
     assert result.kbd_artifacts["alice"].model_type == "isolation_forest"
 
@@ -324,14 +386,23 @@ def test_run_fusion_vs_single_model_comparison_uses_identical_split_for_both_arm
 
     # Test corpus is entirely FULL-quality windows, so both arms score
     # exactly the same held-out windows -- same n_genuine per user.
-    assert result.dual_model_fusion.per_user_n_genuine["alice"] == result.single_fused_model.per_user_n_genuine["alice"]
+    assert (
+        result.dual_model_fusion.per_user_n_genuine["alice"]
+        == result.single_fused_model.per_user_n_genuine["alice"]
+    )
 
 
 def test_run_fusion_vs_single_model_comparison_excludes_user_with_bad_test_day(ml_config):
     corpus = _two_user_corpus(ml_config)
     corpus["carol"] = generate_multiday_user_windows(
-        "carol", 3, ml_config, num_days=6, segments_per_day=1, segment_minutes=15,
-        mean_dd_latency_us=300_000.0, std_dd_latency_us=15_000.0,
+        "carol",
+        3,
+        ml_config,
+        num_days=6,
+        segments_per_day=1,
+        segment_minutes=15,
+        mean_dd_latency_us=300_000.0,
+        std_dd_latency_us=15_000.0,
     )
     test_days = {u: [distinct_days(w)[-1]] for u, w in corpus.items()}
     test_days["alice"] = ["2099-01-01"]
@@ -343,7 +414,9 @@ def test_run_fusion_vs_single_model_comparison_excludes_user_with_bad_test_day(m
     assert "carol" in result.dual_model_fusion.per_user_eer
 
 
-def test_run_fusion_vs_single_model_comparison_surfaces_single_model_imputation_failure_mode(ml_config):
+def test_run_fusion_vs_single_model_comparison_surfaces_single_model_imputation_failure_mode(
+    ml_config,
+):
     # ADR-006's confirmation criterion requires the comparison to show *how*
     # each approach handles a missing modality, not just a headline EER.
     # Simulate a genuine user's own test-day window where mouse activity
@@ -355,9 +428,13 @@ def test_run_fusion_vs_single_model_comparison_surfaces_single_model_imputation_
     alice_windows = list(corpus["alice"])
     last_day = test_days["alice"][0]
     full_indices = [
-        i for i, w in enumerate(alice_windows) if w.collection_day == last_day and w.quality_label == QualityLabel.FULL
+        i
+        for i, w in enumerate(alice_windows)
+        if w.collection_day == last_day and w.quality_label == QualityLabel.FULL
     ]
-    assert len(full_indices) >= 4, "test setup needs enough FULL test windows to convert some to KBD_ONLY"
+    assert (
+        len(full_indices) >= 4
+    ), "test setup needs enough FULL test windows to convert some to KBD_ONLY"
     for i in full_indices[: len(full_indices) // 2]:
         alice_windows[i] = alice_windows[i].model_copy(
             update={"mouse_features": None, "quality_label": QualityLabel.KBD_ONLY}
@@ -371,8 +448,12 @@ def test_run_fusion_vs_single_model_comparison_surfaces_single_model_imputation_
 
     assert dual_kbd_only.n_windows > 0
     assert single_kbd_only.n_windows == dual_kbd_only.n_windows
-    assert dual_kbd_only.n_scored == dual_kbd_only.n_windows  # dual model: clean, always scores on keyboard alone
-    assert single_kbd_only.n_scored == single_kbd_only.n_windows  # single model: always scores, via imputation
+    assert (
+        dual_kbd_only.n_scored == dual_kbd_only.n_windows
+    )  # dual model: clean, always scores on keyboard alone
+    assert (
+        single_kbd_only.n_scored == single_kbd_only.n_windows
+    )  # single model: always scores, via imputation
     assert dual_kbd_only.mean_percentile_score is not None
     assert single_kbd_only.mean_percentile_score is not None
     # The predicted failure mode: the single model's zero-imputed mouse

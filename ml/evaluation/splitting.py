@@ -6,14 +6,14 @@ days... Where data allows, use leave-one-day-out cross-validation."
 
 Every function here operates on ``collection_day`` (a date-only string,
 window metadata -- never a feature, per Section 7.3) and never inspects
-``t_start_us``/``t_end_us`` for splitting, so no wall-clock/time-of-day
-information can leak into the split boundary (ADR-010 adjacent concern).
+``t_start_us``/``t_end_us`` for splitting, so no absolute clock position
+can leak into the split boundary (ADR-010 adjacent concern).
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import Iterator, Sequence
 
 from ml.features.schema import FeatureWindow
 

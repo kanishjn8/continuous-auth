@@ -16,11 +16,11 @@ made, and where to look when reconciling against the real `protocol/`:
 | Assumption | Where | Reconcile when |
 | --- | --- | --- |
 | Event/window schema reproduced by hand instead of codegen'd | `ml/features/schema.py` | T-002 lands — swap imports for generated bindings, keep field names |
-| `config/` tunables live under `ml/config/` instead of repo-root `config/` | `ml/config/thresholds.yaml` | T-002/T-009 land — move file, update loader path only |
+| ML development tunables are now integrated under the repository-root config boundary | `config/ml.development.yaml` | Complete; keep values marked as engineering placeholders until the required experiment |
 | Session/segment attribution assumed already done by caller | `ml/features/windowing.py` | T-007 lands — feed its output directly into `extract_windows` |
 | Hand/row mapping for class-transition latency only defined for alphabetic key classes | `ml/features/keyboard.py`, `ml/features/schema.py` (`KEY_CLASS_HAND`/`KEY_CLASS_ROW`) | Revisit once real typing data is available (Phase 2 distribution analysis) |
 | Mouse resolution/DPI normalization takes an optional `device_resolution` since `MouseEvent` doesn't carry it (Section 7.2) | `ml/features/mouse.py` | T-005 lands and defines where resolution/DPI actually travels in the IPC stream |
-| ADR-005 quality-gate thresholds (`min_keystrokes`, `min_mouse_samples`) are engineering placeholders, not the `[OPEN]` decision's resolution | `ml/config/thresholds.yaml` | Phase 2 empirical distribution analysis (PLAN.md Section 2.10) |
+| ADR-005 quality-gate thresholds (`min_keystrokes`, `min_mouse_samples`) are engineering placeholders, not the `[OPEN]` decision's resolution | `config/ml.development.yaml` | Phase 2 empirical distribution analysis (PLAN.md Section 2.10) |
 
 ## Layout
 

@@ -1,8 +1,7 @@
 """Loader for ML-pipeline tunables.
 
-See ``ml/config/thresholds.yaml`` for the ASSUMPTION note about why this
-file lives under ``ml/config/`` rather than a repo-root ``config/`` (which
-does not exist yet), and the ADR-005 `[OPEN]` note on quality-gate values.
+All ML tunables live in the repository-root ``config/`` directory. The
+development values remain placeholders and do not resolve ADR-005 `[OPEN]`.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from typing import Any
 
 import yaml
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "thresholds.yaml"
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "ml.development.yaml"
 
 
 class ConfigError(ValueError):
@@ -69,7 +68,7 @@ def load_config(path: Path | str | None = None) -> MLConfig:
     if not cfg_path.exists():
         raise ConfigError(f"config file not found: {cfg_path}")
 
-    with open(cfg_path, "r", encoding="utf-8") as f:
+    with open(cfg_path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
 
     if not isinstance(raw, dict):

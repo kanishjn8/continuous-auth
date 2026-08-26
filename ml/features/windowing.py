@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import bisect
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
+from ml.features.keyboard import compute_keyboard_features
+from ml.features.mouse import compute_mouse_features
 from ml.features.schema import (
     AppCategory,
     ContextBlock,
@@ -23,12 +25,12 @@ from ml.features.schema import (
     DeviceClass,
     FeatureWindow,
     KeyboardEvent,
+    KeyboardFeatures,
     MouseEvent,
+    MouseFeatures,
     Provenance,
     QualityLabel,
 )
-from ml.features.keyboard import compute_keyboard_features
-from ml.features.mouse import compute_mouse_features
 
 
 @dataclass(frozen=True)
@@ -92,11 +94,11 @@ class _ContextTimeline:
 def _dominant_device_class(
     kbd: Sequence[KeyboardEvent], mouse: Sequence[MouseEvent]
 ) -> DeviceClass:
-    counts: Counter = Counter()
-    for e in kbd:
-        counts[e.device_class] += 1
-    for e in mouse:
-        counts[e.device_class] += 1
+    counts: Counter[DeviceClass] = Counter()
+    for event in kbd:
+        counts[event.device_class] += 1
+    for event in mouse:
+        counts[event.device_class] += 1
     if not counts:
         return DeviceClass.UNKNOWN
     return counts.most_common(1)[0][0]
@@ -114,7 +116,7 @@ def _build_context_block(
     dominant = max(fractions.items(), key=lambda kv: kv[1])[0] if fractions else AppCategory.UNKNOWN
     return ContextBlock(
         dominant_category=dominant,
-        category_fractions=fractions,
+        category_fractions={category.value: fraction for category, fraction in fractions.items()},
         app_switch_rate=(switches / duration_minutes) if duration_minutes > 0 else 0.0,
         device_class=_dominant_device_class(kbd, mouse),
     )
@@ -180,25 +182,32 @@ class WindowBuilder:
         mouse_count = len(p.mouse)
         label = _quality_label(key_count, mouse_count, cfg)
 
-        kbd_features = None
-        mouse_features = None
+        kbd_features: KeyboardFeatures | None = None
+        mouse_features: MouseFeatures | None = None
         if label in (QualityLabel.FULL, QualityLabel.KBD_ONLY):
-            kbd_features = compute_keyboard_features(
-                p.kbd,
-                pause_threshold_us=cfg.pause_threshold_us,
-                burst_gap_threshold_us=cfg.burst_gap_threshold_us,
-                window_duration_us=max(t_end - p.t_start, 1),
+            kbd_features = KeyboardFeatures(
+                **compute_keyboard_features(
+                    p.kbd,
+                    pause_threshold_us=cfg.pause_threshold_us,
+                    burst_gap_threshold_us=cfg.burst_gap_threshold_us,
+                    window_duration_us=max(t_end - p.t_start, 1),
+                )
             )
         if label in (QualityLabel.FULL, QualityLabel.MOUSE_ONLY):
-            mouse_features = compute_mouse_features(
-                p.mouse,
-                segment_gap_us=cfg.mouse_segment_gap_us,
-                micro_pause_us=cfg.mouse_micro_pause_us,
-                double_click_max_gap_us=cfg.double_click_max_gap_us,
-                scroll_burst_gap_us=cfg.scroll_burst_gap_us,
-                window_duration_us=max(t_end - p.t_start, 1),
-                reference_resolution=(cfg.reference_screen_width_px, cfg.reference_screen_height_px),
-                device_resolution=self.device_resolution,
+            mouse_features = MouseFeatures(
+                **compute_mouse_features(
+                    p.mouse,
+                    segment_gap_us=cfg.mouse_segment_gap_us,
+                    micro_pause_us=cfg.mouse_micro_pause_us,
+                    double_click_max_gap_us=cfg.double_click_max_gap_us,
+                    scroll_burst_gap_us=cfg.scroll_burst_gap_us,
+                    window_duration_us=max(t_end - p.t_start, 1),
+                    reference_resolution=(
+                        cfg.reference_screen_width_px,
+                        cfg.reference_screen_height_px,
+                    ),
+                    device_resolution=self.device_resolution,
+                )
             )
 
         context = _build_context_block(p.t_start, t_end, self._timeline, p.kbd, p.mouse)
@@ -223,9 +232,7 @@ class WindowBuilder:
         self._pending = None
         return window
 
-    def push_events(
-        self, events: Sequence[KeyboardEvent | MouseEvent]
-    ) -> list[FeatureWindow]:
+    def push_events(self, events: Sequence[KeyboardEvent | MouseEvent]) -> list[FeatureWindow]:
         """Feed a time-ordered mixed stream of keyboard/mouse events.
 
         Returns any windows that closed as a result of this call. Callers
@@ -258,6 +265,7 @@ class WindowBuilder:
         if self._pending is None:
             return None
         last_t = max(
-            [e.t_capture_us for e in self._pending.kbd] + [e.t_capture_us for e in self._pending.mouse]
+            [e.t_capture_us for e in self._pending.kbd]
+            + [e.t_capture_us for e in self._pending.mouse]
         )
         return self._close(last_t)

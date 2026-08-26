@@ -12,18 +12,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from typing import Literal, Protocol, Sequence
+from datetime import UTC, datetime
+from typing import Callable, Literal, Protocol
 
 import numpy as np
 
 from ml.calibration.percentile import PercentileCalibrator
 from ml.features.keyboard import KEYBOARD_FEATURE_NAMES
 from ml.features.mouse import MOUSE_FEATURE_NAMES
-from ml.features.schema import FeatureWindow, Provenance
-
-FEATURE_SCHEMA_VERSION = "1.0.0-fixture"  # must match FeatureWindow.feature_schema_version
+from ml.features.schema import FEATURE_SCHEMA_VERSION, FeatureWindow
+from ml.training.gate import require_promotion_gate
+from protocol.generated.python.contracts import UpdateCandidate
 
 # "combined" is the ADR-006 confirmation-criterion comparison baseline: a
 # single model trained on the concatenation of the keyboard and mouse
@@ -86,11 +87,15 @@ def build_feature_matrix(
         if modality == "combined":
             if w.keyboard_features is None or w.mouse_features is None:
                 continue
-            block = {**w.keyboard_features, **w.mouse_features}
+            block = {
+                **w.keyboard_features.model_dump(mode="python"),
+                **w.mouse_features.model_dump(mode="python"),
+            }
         else:
-            block = w.keyboard_features if modality == "keyboard" else w.mouse_features
-            if block is None:
+            selected = w.keyboard_features if modality == "keyboard" else w.mouse_features
+            if selected is None:
                 continue
+            block = selected.model_dump(mode="python")
         rows.append([block[name] for name in names])
         used.append(w)
     if not rows:
@@ -98,7 +103,7 @@ def build_feature_matrix(
     return np.asarray(rows, dtype=float), used
 
 
-def compute_metadata_checksum(payload: dict) -> str:
+def compute_metadata_checksum(payload: Mapping[str, object]) -> str:
     canonical = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
 
@@ -111,10 +116,11 @@ class PreprocessingParams:
     scale: list[float]  # standard deviation per feature; never 0 (see fit())
 
     def transform(self, X: np.ndarray) -> np.ndarray:
-        return (X - np.asarray(self.mean)) / np.asarray(self.scale)
+        transformed = (X - np.asarray(self.mean)) / np.asarray(self.scale)
+        return np.asarray(transformed, dtype=float)
 
     @classmethod
-    def fit(cls, X: np.ndarray) -> "PreprocessingParams":
+    def fit(cls, X: np.ndarray) -> PreprocessingParams:
         mean = X.mean(axis=0)
         std = X.std(axis=0)
         # A constant feature (std == 0) must not produce a divide-by-zero /
@@ -126,7 +132,7 @@ class PreprocessingParams:
 
 
 class OneClassModel(Protocol):
-    def fit(self, X: np.ndarray) -> "OneClassModel": ...
+    def fit(self, X: np.ndarray) -> OneClassModel: ...
 
     def normality_score(self, X: np.ndarray) -> np.ndarray:
         """Higher = more normal (matches sklearn IsolationForest.score_samples
@@ -146,15 +152,15 @@ class ModelArtifact:
     feature_names: list[str]
     training_data_date_range: tuple[str, str]
     provenance_mix: dict[str, int]
-    hyperparameters: dict
+    hyperparameters: dict[str, object]
     preprocessing: PreprocessingParams
     calibration: PercentileCalibrator
-    metrics_at_training: dict
+    metrics_at_training: dict[str, float]
     version: str
     checksum: str = field(default="")
-    model: object = field(default=None, repr=False, compare=False)
+    model: OneClassModel | None = field(default=None, repr=False, compare=False)
 
-    def to_metadata_dict(self) -> dict:
+    def to_metadata_dict(self) -> dict[str, object]:
         """Everything except the fitted model object itself (for checksum/audit).
 
         Builds the dict from individual fields rather than calling
@@ -184,17 +190,17 @@ def _training_metadata(
     modality: Modality,
     windows: Sequence[FeatureWindow],
     model_type: str,
-    hyperparameters: dict,
+    hyperparameters: dict[str, object],
     preprocessing: PreprocessingParams,
     calibrator: PercentileCalibrator,
-    metrics: dict,
+    metrics: dict[str, float],
 ) -> ModelArtifact:
     days = sorted({w.collection_day for w in windows})
     provenance_mix: dict[str, int] = {}
     for w in windows:
         provenance_mix[w.provenance.value] = provenance_mix.get(w.provenance.value, 0) + 1
 
-    version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%f")
+    version = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%f")
     artifact = ModelArtifact(
         user_id=user_id,
         modality=modality,
@@ -218,10 +224,11 @@ def train_one_class_model(
     modality: Modality,
     windows: Sequence[FeatureWindow],
     *,
-    model_factory,
+    model_factory: Callable[[], OneClassModel],
     model_type: str,
-    hyperparameters: dict,
+    hyperparameters: dict[str, object],
     min_windows: int,
+    promoted_candidates: Mapping[str, UpdateCandidate] | None = None,
 ) -> ModelArtifact:
     """Generic per-user, single-modality one-class training routine.
 
@@ -242,6 +249,8 @@ def train_one_class_model(
             f"({distinct_users}); per-user model isolation (P3) violated"
         )
 
+    require_promotion_gate(user_id, windows, promoted_candidates)
+
     X, used = build_feature_matrix(windows, modality)
     if len(used) < min_windows:
         raise InsufficientDataError(
@@ -256,7 +265,9 @@ def train_one_class_model(
     model.fit(X_scaled)
     raw_scores = model.normality_score(X_scaled)
     if not np.all(np.isfinite(raw_scores)):
-        raise ValueError(f"model produced non-finite scores for user={user_id!r} modality={modality!r}")
+        raise ValueError(
+            f"model produced non-finite scores for user={user_id!r} modality={modality!r}"
+        )
 
     calibrator = PercentileCalibrator.fit(raw_scores)
 
@@ -286,12 +297,12 @@ class ScoreResult:
 def score_window(artifact: ModelArtifact, window: FeatureWindow) -> ScoreResult:
     """Score one window against a trained artifact (C3 in TASK_DELEGATION.md).
 
-    If ``window.feature_schema_version`` does not match the artifact's, this
+    If ``window.schema_version`` does not match the artifact's, this
     refuses to score (mismatch guardrail) rather than silently proceeding.
     """
-    if window.feature_schema_version != artifact.feature_schema_version:
+    if window.schema_version != artifact.feature_schema_version:
         raise ModelSchemaMismatchError(
-            f"window feature_schema_version={window.feature_schema_version!r} != "
+            f"window schema_version={window.schema_version!r} != "
             f"artifact feature_schema_version={artifact.feature_schema_version!r}"
         )
 
@@ -308,6 +319,8 @@ def score_window(artifact: ModelArtifact, window: FeatureWindow) -> ScoreResult:
 
     x = np.asarray([[block[name] for name in artifact.feature_names]], dtype=float)
     x_scaled = artifact.preprocessing.transform(x)
+    if artifact.model is None:
+        raise ValueError(f"artifact {artifact.version!r} has no fitted model")
     raw = float(artifact.model.normality_score(x_scaled)[0])
     if not np.isfinite(raw):
         # Never let a bad model/feature interaction propagate downstream as

@@ -5,6 +5,7 @@ import pytest
 
 from ml.baselines.alt_one_class import train_user_modality_one_class_svm
 from ml.baselines.mahalanobis import MahalanobisWrapper, train_user_modality_mahalanobis
+from ml.tests.conftest import generate_user_windows
 from ml.training.common import (
     FEATURE_SCHEMA_VERSION,
     InsufficientDataError,
@@ -14,12 +15,11 @@ from ml.training.common import (
     score_window,
     train_one_class_model,
 )
+from ml.training.gate import PromotionGateRequiredError
 from ml.training.isolation_forest import train_user_modality_isolation_forest, train_user_profile
 from ml.training.model_wrappers import IsolationForestWrapper
 from ml.training.persistence import ArtifactCorruptedError, load_artifact, save_artifact
 from ml.training.single_fused_model import score_single_fused_window, train_user_single_fused_model
-from ml.tests.conftest import generate_user_windows
-
 
 # --- Preprocessing -----------------------------------------------------
 
@@ -72,6 +72,24 @@ def test_train_one_class_model_rejects_multi_user_input(ml_config):
         )
 
 
+def test_training_rejects_team_data_without_promotion_evidence(ml_config):
+    from ml.features.schema import Provenance
+
+    windows = generate_user_windows("u1", seed=1, config=ml_config, duration_minutes=15)
+    unpromoted = [window.model_copy(update={"provenance": Provenance.TEAM}) for window in windows]
+
+    with pytest.raises(PromotionGateRequiredError, match="no Model Update Manager"):
+        train_one_class_model(
+            "u1",
+            "keyboard",
+            unpromoted,
+            model_factory=lambda: IsolationForestWrapper(random_state=42),
+            model_type="isolation_forest",
+            hyperparameters={},
+            min_windows=1,
+        )
+
+
 def test_insufficient_windows_raises(ml_config):
     windows = generate_user_windows("u1", seed=1, config=ml_config, duration_minutes=1)
     with pytest.raises(InsufficientDataError):
@@ -90,7 +108,7 @@ def test_isolation_forest_artifact_has_required_metadata_fields(ml_config):
     assert artifact.feature_schema_version == FEATURE_SCHEMA_VERSION
     assert artifact.feature_names
     assert artifact.training_data_date_range == ("2026-01-01", "2026-01-01")
-    assert artifact.provenance_mix.get("synthetic", 0) > 0
+    assert artifact.provenance_mix.get("SYNTHETIC", 0) > 0
     assert artifact.hyperparameters
     assert artifact.calibration.reference_scores
     assert artifact.metrics_at_training["n_training_windows"] > 0
@@ -111,13 +129,28 @@ def test_scoring_separates_normal_from_distinctly_different_behavior(ml_config):
     # should land, on average, further from the genuine distribution's
     # center than alice's own held-out windows.
     alice_train = generate_user_windows(
-        "alice", seed=1, config=ml_config, duration_minutes=60, mean_dd_latency_us=150_000.0, std_dd_latency_us=20_000.0
+        "alice",
+        seed=1,
+        config=ml_config,
+        duration_minutes=60,
+        mean_dd_latency_us=150_000.0,
+        std_dd_latency_us=20_000.0,
     )
     alice_holdout = generate_user_windows(
-        "alice", seed=99, config=ml_config, duration_minutes=15, mean_dd_latency_us=150_000.0, std_dd_latency_us=20_000.0
+        "alice",
+        seed=99,
+        config=ml_config,
+        duration_minutes=15,
+        mean_dd_latency_us=150_000.0,
+        std_dd_latency_us=20_000.0,
     )
     impostor_like = generate_user_windows(
-        "alice", seed=2, config=ml_config, duration_minutes=15, mean_dd_latency_us=600_000.0, std_dd_latency_us=20_000.0
+        "alice",
+        seed=2,
+        config=ml_config,
+        duration_minutes=15,
+        mean_dd_latency_us=600_000.0,
+        std_dd_latency_us=20_000.0,
     )
 
     artifact = train_user_modality_isolation_forest("alice", "keyboard", alice_train, ml_config)
@@ -137,7 +170,7 @@ def test_scoring_separates_normal_from_distinctly_different_behavior(ml_config):
 
 
 def test_score_window_missing_modality_returns_unavailable_not_fabricated(ml_config):
-    from ml.datasets.synthetic import SyntheticUserProfile, generate_keyboard_stream, _SeqCounter
+    from ml.datasets.synthetic import SyntheticUserProfile, _SeqCounter, generate_keyboard_stream
     from ml.features.extractor import extract_windows
     from ml.features.schema import Provenance
 
@@ -187,7 +220,7 @@ def test_score_window_refuses_on_schema_mismatch(ml_config):
     windows = generate_user_windows("u1", seed=1, config=ml_config, duration_minutes=60)
     artifact = train_user_modality_isolation_forest("u1", "keyboard", windows, ml_config)
 
-    tampered = windows[0].model_copy(update={"feature_schema_version": "9.9.9-incompatible"})
+    tampered = windows[0].model_copy(update={"schema_version": "9.9.9-incompatible"})
     with pytest.raises(ModelSchemaMismatchError):
         score_window(artifact, tampered)
 
@@ -214,7 +247,7 @@ def test_mahalanobis_singular_covariance_does_not_crash():
 
 
 def test_mahalanobis_ridge_must_be_scaled_to_standardized_feature_variance():
-    # min_baseline_windows (20, ml/config/thresholds.yaml) is smaller than
+    # min_baseline_windows (20, config/ml.development.yaml) is smaller than
     # the keyboard feature block (24 dims), so a user trained at exactly the
     # admission threshold has a rank-deficient empirical covariance -- and
     # features reach this baseline already standardized (per-feature
@@ -245,7 +278,9 @@ def test_one_class_svm_baseline_trains_and_scores(ml_config):
     assert np.isfinite(result.raw_score)
 
 
-def test_baselines_and_primary_model_use_identical_preprocessing_and_calibration_procedure(ml_config):
+def test_baselines_and_primary_model_use_identical_preprocessing_and_calibration_procedure(
+    ml_config,
+):
     windows = generate_user_windows("u1", seed=1, config=ml_config, duration_minutes=60)
     iso = train_user_modality_isolation_forest("u1", "keyboard", windows, ml_config)
     maha = train_user_modality_mahalanobis("u1", "keyboard", windows, ml_config)
@@ -303,13 +338,15 @@ def _kbd_only_window(ml_config, *, user_id="u1", seed=123, n_keystrokes=20):
     always yields mouse_features=None regardless of gate thresholds, mirroring
     test_score_window_missing_modality_returns_unavailable_not_fabricated.
     """
-    from ml.datasets.synthetic import SyntheticUserProfile, generate_keyboard_stream, _SeqCounter
+    from ml.datasets.synthetic import SyntheticUserProfile, _SeqCounter, generate_keyboard_stream
     from ml.features.extractor import extract_windows
     from ml.features.schema import Provenance
 
     profile = SyntheticUserProfile(user_id=user_id)
     rng = np.random.default_rng(seed)
-    kbd_events = generate_keyboard_stream(profile, rng, n_keystrokes=n_keystrokes, t_start_us=0, seq=_SeqCounter())
+    kbd_events = generate_keyboard_stream(
+        profile, rng, n_keystrokes=n_keystrokes, t_start_us=0, seq=_SeqCounter()
+    )
     windows = extract_windows(
         kbd_events,
         [],
@@ -383,6 +420,6 @@ def test_score_single_fused_window_refuses_on_schema_mismatch(ml_config):
     windows = generate_user_windows("u1", seed=1, config=ml_config, duration_minutes=60)
     artifact = train_user_single_fused_model("u1", windows, ml_config)
 
-    tampered = windows[0].model_copy(update={"feature_schema_version": "9.9.9-incompatible"})
+    tampered = windows[0].model_copy(update={"schema_version": "9.9.9-incompatible"})
     with pytest.raises(ModelSchemaMismatchError):
         score_single_fused_window(artifact, tampered)

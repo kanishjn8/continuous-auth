@@ -162,7 +162,9 @@ def test_resolution_normalization_scales_velocity():
         events, window_duration_us=100_000, device_resolution=(3840, 1080), **DEFAULT_KW
     )
     # Reference width 1920 vs device width 3840 => scale factor 0.5
-    assert math.isclose(normalized["velocity_mean"], unnormalized["velocity_mean"] * 0.5, rel_tol=1e-9)
+    assert math.isclose(
+        normalized["velocity_mean"], unnormalized["velocity_mean"] * 0.5, rel_tol=1e-9
+    )
 
 
 def test_jerk_not_computed_across_segment_boundary():

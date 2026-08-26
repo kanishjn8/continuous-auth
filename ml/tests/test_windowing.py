@@ -7,7 +7,8 @@ from ml.tests.conftest import kbd, mouse_move
 
 def test_window_closes_on_keystroke_count(ml_config):
     events = [
-        kbd(i, i * 100_000, KeyClass.ALPHA_L_HOME, "KEY_DOWN") for i in range(ml_config.windowing.window_keystrokes)
+        kbd(i, i * 100_000, KeyClass.ALPHA_L_HOME, "KEY_DOWN")
+        for i in range(ml_config.windowing.window_keystrokes)
     ]
     windows = extract_windows(
         events,
@@ -138,7 +139,12 @@ def test_context_never_appears_in_identity_feature_arrays(ml_config):
         config=ml_config,
     )
     kbd_features, mouse_features = windows[0].to_identity_arrays()
-    context_field_names = {"dominant_category", "category_fractions", "app_switch_rate", "device_class"}
+    context_field_names = {
+        "dominant_category",
+        "category_fractions",
+        "app_switch_rate",
+        "device_class",
+    }
     assert context_field_names.isdisjoint((kbd_features or {}).keys())
     assert context_field_names.isdisjoint((mouse_features or {}).keys())
 

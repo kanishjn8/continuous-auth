@@ -20,8 +20,9 @@ of hiding it.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Sequence
+from typing import Literal
 
 import numpy as np
 
@@ -78,7 +79,9 @@ class SingleFusedScoreResult:
     missing_modality: MissingModality
 
 
-def score_single_fused_window(artifact: ModelArtifact, window: FeatureWindow) -> SingleFusedScoreResult:
+def score_single_fused_window(
+    artifact: ModelArtifact, window: FeatureWindow
+) -> SingleFusedScoreResult:
     """Score one window against the single fused-vector artifact.
 
     Unlike ``ml.training.common.score_window`` (which reports a missing
@@ -93,27 +96,36 @@ def score_single_fused_window(artifact: ModelArtifact, window: FeatureWindow) ->
     refuses to fabricate a score (matches ADR-005: no score for
     ``INSUFFICIENT_DATA`` windows).
     """
-    if window.feature_schema_version != artifact.feature_schema_version:
+    if window.schema_version != artifact.feature_schema_version:
         raise ModelSchemaMismatchError(
-            f"window feature_schema_version={window.feature_schema_version!r} != "
+            f"window schema_version={window.schema_version!r} != "
             f"artifact feature_schema_version={artifact.feature_schema_version!r}"
         )
 
-    kbd, mouse = window.keyboard_features, window.mouse_features
-    if kbd is None and mouse is None:
-        return SingleFusedScoreResult(available=False, raw_score=None, percentile_score=None, missing_modality=None)
+    keyboard = window.keyboard_features
+    mouse = window.mouse_features
+    if keyboard is None and mouse is None:
+        return SingleFusedScoreResult(
+            available=False, raw_score=None, percentile_score=None, missing_modality=None
+        )
 
     missing: MissingModality = None
-    if kbd is None:
+    if keyboard is None:
         missing = "keyboard"
-        kbd = {name: 0.0 for name in KEYBOARD_FEATURE_NAMES}
+        keyboard_values = {name: 0.0 for name in KEYBOARD_FEATURE_NAMES}
+    else:
+        keyboard_values = keyboard.model_dump(mode="python")
     if mouse is None:
         missing = "mouse"
-        mouse = {name: 0.0 for name in MOUSE_FEATURE_NAMES}
+        mouse_values = {name: 0.0 for name in MOUSE_FEATURE_NAMES}
+    else:
+        mouse_values = mouse.model_dump(mode="python")
 
-    combined = {**kbd, **mouse}
+    combined = {**keyboard_values, **mouse_values}
     x = np.asarray([[combined[name] for name in artifact.feature_names]], dtype=float)
     x_scaled = artifact.preprocessing.transform(x)
+    if artifact.model is None:
+        raise ValueError(f"artifact {artifact.version!r} has no fitted model")
     raw = float(artifact.model.normality_score(x_scaled)[0])
     if not np.isfinite(raw):
         raise ValueError(
@@ -121,4 +133,6 @@ def score_single_fused_window(artifact: ModelArtifact, window: FeatureWindow) ->
             f"window_id={window.window_id!r}"
         )
     pct = float(artifact.calibration.transform(np.asarray([raw]))[0])
-    return SingleFusedScoreResult(available=True, raw_score=raw, percentile_score=pct, missing_modality=missing)
+    return SingleFusedScoreResult(
+        available=True, raw_score=raw, percentile_score=pct, missing_modality=missing
+    )

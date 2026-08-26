@@ -5,14 +5,16 @@ import pytest
 from ml.features.config import load_config
 from ml.features.schema import (
     DeviceClass,
-    KeyClass,
     KeyboardEvent,
+    KeyClass,
     MouseButton,
     MouseEvent,
 )
 
 
-def kbd(seq: int, t_us: int, key_class: KeyClass, ev_type: str, *, is_repeat: bool = False) -> KeyboardEvent:
+def kbd(
+    seq: int, t_us: int, key_class: KeyClass, ev_type: str, *, is_repeat: bool = False
+) -> KeyboardEvent:
     return KeyboardEvent(
         type=ev_type,
         t_capture_us=t_us,
@@ -36,7 +38,9 @@ def mouse_move(seq: int, t_us: int, x: float, y: float) -> MouseEvent:
     )
 
 
-def mouse_click(seq: int, t_us: int, ev_type: str, button: MouseButton = MouseButton.LEFT) -> MouseEvent:
+def mouse_click(
+    seq: int, t_us: int, ev_type: str, button: MouseButton = MouseButton.LEFT
+) -> MouseEvent:
     return MouseEvent(
         type=ev_type,
         t_capture_us=t_us,
@@ -67,7 +71,9 @@ def ml_config():
     return load_config()
 
 
-def generate_user_windows(user_id: str, seed: int, config, *, duration_minutes: int = 60, **profile_kwargs):
+def generate_user_windows(
+    user_id: str, seed: int, config, *, duration_minutes: int = 60, **profile_kwargs
+):
     """Test helper: synthesize enough FeatureWindows for one user to exceed
     typical min_baseline_windows thresholds, via the real T-008 pipeline.
     """

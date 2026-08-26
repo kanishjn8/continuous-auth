@@ -48,7 +48,7 @@ def _modality_scores(artifact: ModelArtifact, windows: list[FeatureWindow]) -> l
             raise
         except ValueError:
             continue
-        if result.available:
+        if result.available and result.percentile_score is not None:
             scores.append(result.percentile_score)
     return scores
 

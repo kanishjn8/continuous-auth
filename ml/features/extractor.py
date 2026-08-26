@@ -8,7 +8,7 @@ feature implementation.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from ml.features.config import MLConfig
 from ml.features.schema import ContextEvent, FeatureWindow, KeyboardEvent, MouseEvent, Provenance

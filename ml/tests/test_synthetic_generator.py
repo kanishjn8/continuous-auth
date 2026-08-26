@@ -21,10 +21,20 @@ def _dump_segment(seg):
 def test_same_seed_is_byte_identical():
     profile = SyntheticUserProfile(user_id="alice")
     seg1 = generate_segment(
-        profile, seed=42, session_id="s1", segment_id="seg1", collection_day="2026-01-01", duration_us=5_000_000
+        profile,
+        seed=42,
+        session_id="s1",
+        segment_id="seg1",
+        collection_day="2026-01-01",
+        duration_us=5_000_000,
     )
     seg2 = generate_segment(
-        profile, seed=42, session_id="s1", segment_id="seg1", collection_day="2026-01-01", duration_us=5_000_000
+        profile,
+        seed=42,
+        session_id="s1",
+        segment_id="seg1",
+        collection_day="2026-01-01",
+        duration_us=5_000_000,
     )
     assert _dump_segment(seg1) == _dump_segment(seg2)
 
@@ -32,10 +42,20 @@ def test_same_seed_is_byte_identical():
 def test_different_seed_produces_different_output():
     profile = SyntheticUserProfile(user_id="alice")
     seg1 = generate_segment(
-        profile, seed=1, session_id="s1", segment_id="seg1", collection_day="2026-01-01", duration_us=5_000_000
+        profile,
+        seed=1,
+        session_id="s1",
+        segment_id="seg1",
+        collection_day="2026-01-01",
+        duration_us=5_000_000,
     )
     seg2 = generate_segment(
-        profile, seed=2, session_id="s1", segment_id="seg1", collection_day="2026-01-01", duration_us=5_000_000
+        profile,
+        seed=2,
+        session_id="s1",
+        segment_id="seg1",
+        collection_day="2026-01-01",
+        duration_us=5_000_000,
     )
     assert _dump_segment(seg1) != _dump_segment(seg2)
 
@@ -43,7 +63,12 @@ def test_different_seed_produces_different_output():
 def test_all_events_carry_synthetic_provenance_end_to_end(ml_config):
     profile = SyntheticUserProfile(user_id="alice")
     seg = generate_segment(
-        profile, seed=7, session_id="s1", segment_id="seg1", collection_day="2026-01-01", duration_us=10_000_000
+        profile,
+        seed=7,
+        session_id="s1",
+        segment_id="seg1",
+        collection_day="2026-01-01",
+        duration_us=10_000_000,
     )
     windows = extract_windows(
         seg.keyboard_events,
@@ -63,7 +88,12 @@ def test_all_events_carry_synthetic_provenance_end_to_end(ml_config):
 def test_generated_stream_produces_full_quality_windows(ml_config):
     profile = SyntheticUserProfile(user_id="alice")
     seg = generate_segment(
-        profile, seed=7, session_id="s1", segment_id="seg1", collection_day="2026-01-01", duration_us=15_000_000
+        profile,
+        seed=7,
+        session_id="s1",
+        segment_id="seg1",
+        collection_day="2026-01-01",
+        duration_us=15_000_000,
     )
     windows = extract_windows(
         seg.keyboard_events,
@@ -83,22 +113,40 @@ def test_generated_stream_produces_full_quality_windows(ml_config):
 
 
 def test_two_profiles_are_behaviorally_separable():
-    fast_typist = SyntheticUserProfile(user_id="fast", mean_dd_latency_us=100_000.0, std_dd_latency_us=10_000.0)
-    slow_typist = SyntheticUserProfile(user_id="slow", mean_dd_latency_us=400_000.0, std_dd_latency_us=10_000.0)
+    fast_typist = SyntheticUserProfile(
+        user_id="fast", mean_dd_latency_us=100_000.0, std_dd_latency_us=10_000.0
+    )
+    slow_typist = SyntheticUserProfile(
+        user_id="slow", mean_dd_latency_us=400_000.0, std_dd_latency_us=10_000.0
+    )
 
     fast_seg = generate_segment(
-        fast_typist, seed=1, session_id="s1", segment_id="seg1", collection_day="2026-01-01", duration_us=10_000_000
+        fast_typist,
+        seed=1,
+        session_id="s1",
+        segment_id="seg1",
+        collection_day="2026-01-01",
+        duration_us=10_000_000,
     )
     slow_seg = generate_segment(
-        slow_typist, seed=1, session_id="s1", segment_id="seg1", collection_day="2026-01-01", duration_us=10_000_000
+        slow_typist,
+        seed=1,
+        session_id="s1",
+        segment_id="seg1",
+        collection_day="2026-01-01",
+        duration_us=10_000_000,
     )
     # A faster mean dd_latency means more keystrokes fit in the same duration.
     assert len(fast_seg.keyboard_events) > len(slow_seg.keyboard_events)
 
 
 def test_takeover_segment_switches_profile_partway_through():
-    genuine = SyntheticUserProfile(user_id="genuine", mean_dd_latency_us=150_000.0, std_dd_latency_us=5_000.0)
-    impostor = SyntheticUserProfile(user_id="impostor", mean_dd_latency_us=150_000.0, std_dd_latency_us=5_000.0)
+    genuine = SyntheticUserProfile(
+        user_id="genuine", mean_dd_latency_us=150_000.0, std_dd_latency_us=5_000.0
+    )
+    impostor = SyntheticUserProfile(
+        user_id="impostor", mean_dd_latency_us=150_000.0, std_dd_latency_us=5_000.0
+    )
     seg = generate_takeover_segment(
         genuine,
         impostor,

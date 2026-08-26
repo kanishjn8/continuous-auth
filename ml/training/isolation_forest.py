@@ -2,17 +2,17 @@
 
 PLAN.md Section 10.1: "Baseline model: Isolation Forest (scikit-learn), one
 per modality per user (ADR-006)." Hyperparameters come from
-``ml/config/thresholds.yaml`` (guardrail: no hardcoded threshold/weight
+``config/ml.development.yaml`` (guardrail: no hardcoded threshold/weight
 outside config).
 """
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from ml.features.config import MLConfig
 from ml.features.schema import FeatureWindow
-from ml.training.common import ModelArtifact, Modality, train_one_class_model
+from ml.training.common import Modality, ModelArtifact, train_one_class_model
 from ml.training.model_wrappers import IsolationForestWrapper
 
 
@@ -55,7 +55,9 @@ def train_user_profile(
     profile: dict[Modality, ModelArtifact] = {}
     for modality in ("keyboard", "mouse"):
         try:
-            profile[modality] = train_user_modality_isolation_forest(user_id, modality, windows, config)
+            profile[modality] = train_user_modality_isolation_forest(
+                user_id, modality, windows, config
+            )
         except InsufficientDataError:
             continue
     return profile

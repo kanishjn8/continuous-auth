@@ -13,16 +13,24 @@ from pathlib import Path
 
 import joblib
 
-from ml.training.common import (
-    FEATURE_SCHEMA_VERSION,
-    ModelArtifact,
-    ModelSchemaMismatchError,
-    compute_metadata_checksum,
-)
+from ml.features.schema import FEATURE_SCHEMA_VERSION
+from ml.training.common import ModelArtifact, ModelSchemaMismatchError, compute_metadata_checksum
 
 
 class ArtifactCorruptedError(ValueError):
     """Raised when a loaded artifact's checksum does not match its metadata."""
+
+
+def assert_feature_schema_compatible(
+    artifact: ModelArtifact, expected_feature_schema_version: str
+) -> None:
+    """Refuse an artifact produced for a different feature contract."""
+
+    if artifact.feature_schema_version != expected_feature_schema_version:
+        raise ModelSchemaMismatchError(
+            f"artifact feature_schema_version={artifact.feature_schema_version!r} != "
+            f"running feature_schema_version={expected_feature_schema_version!r}; refusing to load"
+        )
 
 
 def save_artifact(artifact: ModelArtifact, path: Path | str) -> None:
@@ -31,7 +39,9 @@ def save_artifact(artifact: ModelArtifact, path: Path | str) -> None:
     joblib.dump(artifact, path)
 
 
-def load_artifact(path: Path | str, *, expected_feature_schema_version: str = FEATURE_SCHEMA_VERSION) -> ModelArtifact:
+def load_artifact(
+    path: Path | str, *, expected_feature_schema_version: str = FEATURE_SCHEMA_VERSION
+) -> ModelArtifact:
     """Load and validate a model artifact.
 
     Refuses (raises) rather than returning a usable-but-wrong artifact when:
@@ -46,16 +56,13 @@ def load_artifact(path: Path | str, *, expected_feature_schema_version: str = FE
 
     artifact: ModelArtifact = joblib.load(path)
 
-    if artifact.feature_schema_version != expected_feature_schema_version:
-        raise ModelSchemaMismatchError(
-            f"artifact feature_schema_version={artifact.feature_schema_version!r} != "
-            f"running feature_schema_version={expected_feature_schema_version!r}; refusing to load"
-        )
+    assert_feature_schema_compatible(artifact, expected_feature_schema_version)
 
     recomputed = compute_metadata_checksum(artifact.to_metadata_dict())
     if recomputed != artifact.checksum:
         raise ArtifactCorruptedError(
-            f"checksum mismatch for artifact at {path}: stored={artifact.checksum!r} recomputed={recomputed!r}"
+            f"checksum mismatch for artifact at {path}: "
+            f"stored={artifact.checksum!r} recomputed={recomputed!r}"
         )
 
     return artifact

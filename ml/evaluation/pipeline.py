@@ -7,8 +7,8 @@ features/splits/calibration across every model compared (PLAN.md Section
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
 import numpy as np
 
@@ -20,7 +20,7 @@ from ml.evaluation.metrics import EerResult, PerUserMetrics, compute_eer, per_us
 from ml.evaluation.splitting import DaySplit, day_disjoint_split, enrollment_length_subsets
 from ml.features.config import MLConfig
 from ml.features.schema import FeatureWindow, QualityLabel
-from ml.training.common import InsufficientDataError, ModelArtifact, Modality, score_window
+from ml.training.common import InsufficientDataError, Modality, ModelArtifact, score_window
 from ml.training.isolation_forest import train_user_modality_isolation_forest
 from ml.training.single_fused_model import score_single_fused_window, train_user_single_fused_model
 
@@ -148,10 +148,16 @@ class MissingModalityHandling:
     anomaly_threshold: float
 
 
-def _summarize_missing_modality(windows: list[FeatureWindow], scores: list[float], anomaly_threshold: float) -> MissingModalityHandling:
+def _summarize_missing_modality(
+    windows: list[FeatureWindow], scores: list[float], anomaly_threshold: float
+) -> MissingModalityHandling:
     if not scores:
         return MissingModalityHandling(
-            n_windows=len(windows), n_scored=0, mean_percentile_score=None, fraction_below_threshold=None, anomaly_threshold=anomaly_threshold
+            n_windows=len(windows),
+            n_scored=0,
+            mean_percentile_score=None,
+            fraction_below_threshold=None,
+            anomaly_threshold=anomaly_threshold,
         )
     arr = np.asarray(scores, dtype=float)
     return MissingModalityHandling(
@@ -213,12 +219,14 @@ def _missing_modality_handling_single(
                 continue
             windows.append(w)
             r = score_single_fused_window(artifact, w)
-            if r.available:
+            if r.available and r.percentile_score is not None:
                 scores.append(r.percentile_score)
     return _summarize_missing_modality(windows, scores, anomaly_threshold)
 
 
-def _eer_and_counts_from_cross(cross: dict[str, CrossEvalResult]) -> tuple[dict[str, float], dict[str, int], dict[str, int]]:
+def _eer_and_counts_from_cross(
+    cross: dict[str, CrossEvalResult],
+) -> tuple[dict[str, float], dict[str, int], dict[str, int]]:
     per_user_eer: dict[str, float] = {}
     n_genuine: dict[str, int] = {}
     n_impostor: dict[str, int] = {}
@@ -233,11 +241,15 @@ def _eer_and_counts_from_cross(cross: dict[str, CrossEvalResult]) -> tuple[dict[
     return per_user_eer, n_genuine, n_impostor
 
 
-def _aggregate_eer(per_user_eer: dict[str, float], n_genuine: dict[str, int], n_impostor: dict[str, int]) -> dict[str, float]:
+def _aggregate_eer(
+    per_user_eer: dict[str, float], n_genuine: dict[str, int], n_impostor: dict[str, int]
+) -> dict[str, float]:
     if not per_user_eer:
         return {}
     metrics_list = [
-        PerUserMetrics(user_id=u, n_genuine=n_genuine[u], n_impostor=n_impostor[u], eer=eer, eer_threshold=0.0)
+        PerUserMetrics(
+            user_id=u, n_genuine=n_genuine[u], n_impostor=n_impostor[u], eer=eer, eer_threshold=0.0
+        )
         for u, eer in per_user_eer.items()
     ]
     return per_user_metric_spread(metrics_list)
@@ -254,17 +266,27 @@ def _single_fused_cross_evaluation(
     results: dict[str, CrossEvalResult] = {}
     for user_id, artifact in single_artifacts.items():
         genuine_windows = test_windows_by_user.get(user_id, [])
-        genuine_scores = [r.percentile_score for w in genuine_windows if (r := score_single_fused_window(artifact, w)).available]
+        genuine_scores = []
+        for window in genuine_windows:
+            result = score_single_fused_window(artifact, window)
+            if result.available and result.percentile_score is not None:
+                genuine_scores.append(result.percentile_score)
 
         impostor_scores: dict[str, list[float]] = {}
         for other_id, other_windows in test_windows_by_user.items():
             if other_id == user_id:
                 continue
-            scores = [r.percentile_score for w in other_windows if (r := score_single_fused_window(artifact, w)).available]
+            scores = []
+            for window in other_windows:
+                result = score_single_fused_window(artifact, window)
+                if result.available and result.percentile_score is not None:
+                    scores.append(result.percentile_score)
             if scores:
                 impostor_scores[other_id] = scores
 
-        results[user_id] = CrossEvalResult(user_id=user_id, genuine_scores=genuine_scores, impostor_scores=impostor_scores)
+        results[user_id] = CrossEvalResult(
+            user_id=user_id, genuine_scores=genuine_scores, impostor_scores=impostor_scores
+        )
     return results
 
 
@@ -346,8 +368,12 @@ def run_fusion_vs_single_model_comparison(
             continue
 
         try:
-            kbd_artifacts[user_id] = train_user_modality_isolation_forest(user_id, "keyboard", split.train, config)
-            mouse_artifacts[user_id] = train_user_modality_isolation_forest(user_id, "mouse", split.train, config)
+            kbd_artifacts[user_id] = train_user_modality_isolation_forest(
+                user_id, "keyboard", split.train, config
+            )
+            mouse_artifacts[user_id] = train_user_modality_isolation_forest(
+                user_id, "mouse", split.train, config
+            )
         except InsufficientDataError as e:
             excluded[user_id] = str(e)
             continue
@@ -363,7 +389,9 @@ def run_fusion_vs_single_model_comparison(
             # gap is itself part of the ADR-006 comparison, not an error.
             single_excluded[user_id] = str(e)
 
-    dual_cross = fused_cross_evaluation(kbd_artifacts, mouse_artifacts, test_windows_by_user, w_kbd=w_kbd, w_mouse=w_mouse)
+    dual_cross = fused_cross_evaluation(
+        kbd_artifacts, mouse_artifacts, test_windows_by_user, w_kbd=w_kbd, w_mouse=w_mouse
+    )
     kbd_cross = zero_effort_cross_evaluation(kbd_artifacts, test_windows_by_user)
     mouse_cross = zero_effort_cross_evaluation(mouse_artifacts, test_windows_by_user)
     single_cross = _single_fused_cross_evaluation(single_artifacts, test_windows_by_user)
@@ -381,10 +409,22 @@ def run_fusion_vs_single_model_comparison(
         aggregate=_aggregate_eer(dual_eer, dual_ng, dual_ni),
         missing_modality={
             "kbd_only": _missing_modality_handling_dual(
-                kbd_artifacts, mouse_artifacts, test_windows_by_user, QualityLabel.KBD_ONLY, w_kbd=w_kbd, w_mouse=w_mouse, anomaly_threshold=anomaly_threshold
+                kbd_artifacts,
+                mouse_artifacts,
+                test_windows_by_user,
+                QualityLabel.KBD_ONLY,
+                w_kbd=w_kbd,
+                w_mouse=w_mouse,
+                anomaly_threshold=anomaly_threshold,
             ),
             "mouse_only": _missing_modality_handling_dual(
-                kbd_artifacts, mouse_artifacts, test_windows_by_user, QualityLabel.MOUSE_ONLY, w_kbd=w_kbd, w_mouse=w_mouse, anomaly_threshold=anomaly_threshold
+                kbd_artifacts,
+                mouse_artifacts,
+                test_windows_by_user,
+                QualityLabel.MOUSE_ONLY,
+                w_kbd=w_kbd,
+                w_mouse=w_mouse,
+                anomaly_threshold=anomaly_threshold,
             ),
         },
     )
@@ -395,8 +435,18 @@ def run_fusion_vs_single_model_comparison(
         per_user_n_impostor=single_ni,
         aggregate=_aggregate_eer(single_eer, single_ng, single_ni),
         missing_modality={
-            "kbd_only": _missing_modality_handling_single(single_artifacts, test_windows_by_user, QualityLabel.KBD_ONLY, anomaly_threshold=anomaly_threshold),
-            "mouse_only": _missing_modality_handling_single(single_artifacts, test_windows_by_user, QualityLabel.MOUSE_ONLY, anomaly_threshold=anomaly_threshold),
+            "kbd_only": _missing_modality_handling_single(
+                single_artifacts,
+                test_windows_by_user,
+                QualityLabel.KBD_ONLY,
+                anomaly_threshold=anomaly_threshold,
+            ),
+            "mouse_only": _missing_modality_handling_single(
+                single_artifacts,
+                test_windows_by_user,
+                QualityLabel.MOUSE_ONLY,
+                anomaly_threshold=anomaly_threshold,
+            ),
         },
     )
     kbd_arm = ComparisonArm(
@@ -436,7 +486,7 @@ def run_enrollment_length_experiment(
     holdout_days: Sequence[str],
     config: MLConfig,
     impostor_windows: list[FeatureWindow] | None = None,
-) -> dict[int, dict]:
+) -> dict[int, dict[str, object]]:
     """PLAN.md Section 10.5: train on 1/2/3/5/7+ days, evaluate against a
     held-out partition held constant across all lengths, report FAR/FRR/EER
     (when impostor windows are supplied) or a genuine-only FRR diagnostic
@@ -448,33 +498,37 @@ def run_enrollment_length_experiment(
     if not holdout_windows:
         raise ValueError("holdout_days matched no windows -- cannot evaluate any enrollment length")
 
-    results: dict[int, dict] = {}
+    results: dict[int, dict[str, object]] = {}
     for n_days, train_windows in subsets.items():
         try:
-            artifact = train_user_modality_isolation_forest(user_id, modality, train_windows, config)
+            artifact = train_user_modality_isolation_forest(
+                user_id, modality, train_windows, config
+            )
         except InsufficientDataError as e:
             results[n_days] = {"status": "insufficient_data", "reason": str(e)}
             continue
 
-        genuine_scores = [
-            r.percentile_score
-            for w in holdout_windows
-            if (r := score_window(artifact, w)).available
-        ]
-        entry: dict = {
+        genuine_scores = []
+        for window in holdout_windows:
+            result = score_window(artifact, window)
+            if result.available and result.percentile_score is not None:
+                genuine_scores.append(result.percentile_score)
+        entry: dict[str, object] = {
             "status": "ok",
             "n_training_windows": len(train_windows),
             "n_genuine_test": len(genuine_scores),
         }
         if impostor_windows:
-            impostor_scores = [
-                r.percentile_score
-                for w in impostor_windows
-                if (r := score_window(artifact, w)).available
-            ]
+            impostor_scores = []
+            for window in impostor_windows:
+                result = score_window(artifact, window)
+                if result.available and result.percentile_score is not None:
+                    impostor_scores.append(result.percentile_score)
             entry["n_impostor_test"] = len(impostor_scores)
             if genuine_scores and impostor_scores:
-                eer: EerResult = compute_eer(np.asarray(genuine_scores), np.asarray(impostor_scores))
+                eer: EerResult = compute_eer(
+                    np.asarray(genuine_scores), np.asarray(impostor_scores)
+                )
                 entry["eer"] = eer.eer
                 entry["eer_threshold"] = eer.threshold
         elif genuine_scores:

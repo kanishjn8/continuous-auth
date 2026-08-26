@@ -26,7 +26,9 @@ class FarFrr:
     frr: float
 
 
-def compute_far_frr(genuine_scores: np.ndarray, impostor_scores: np.ndarray, threshold: float) -> FarFrr:
+def compute_far_frr(
+    genuine_scores: np.ndarray, impostor_scores: np.ndarray, threshold: float
+) -> FarFrr:
     """FAR = fraction of impostor windows accepted; FRR = fraction of genuine windows rejected."""
     genuine_scores = np.asarray(genuine_scores, dtype=float)
     impostor_scores = np.asarray(impostor_scores, dtype=float)
@@ -78,7 +80,9 @@ class EerResult:
     threshold: float
 
 
-def compute_eer(genuine_scores: np.ndarray, impostor_scores: np.ndarray, *, n_thresholds: int = 2001) -> EerResult:
+def compute_eer(
+    genuine_scores: np.ndarray, impostor_scores: np.ndarray, *, n_thresholds: int = 2001
+) -> EerResult:
     """Equal Error Rate: the threshold where FAR and FRR are (approximately) equal.
 
     Reports the average of FAR/FRR at the crossing point, and the

@@ -1,14 +1,8 @@
 # ML-pipeline tunables for T-008/T-010/T-011.
 #
-# ASSUMPTION: PLAN.md Section 16 designates repo-root `config/` as "the sole
-# home of tunable values", owned collectively (T-002/T-009 establish it).
-# That directory does not exist yet in this repository. Per guardrail G9
-# (Section 19.3: "No hardcoded threshold, weight, or window size outside
-# config/") this file exists so ML tunables are not hardcoded in source,
-# while staying inside ml/ as instructed. When repo-root `config/` lands,
-# move this file to `config/ml_thresholds.yaml` and update
-# `ml/features/config.py` / `ml/training/*` / `ml/evaluation/*` to load from
-# there instead — no other change should be required.
+# Repository rule: every tunable value lives under the root `config/`
+# directory. This development-only file keeps the ML pipeline's engineering
+# placeholders separate from the runtime configuration in `development.yaml`.
 #
 # ADR-005 explicitly marks window quality-gate thresholds `[OPEN]`:
 # "Exact thresholds (min_keystrokes, min_mouse_samples) to be set in Phase 2
@@ -91,3 +85,4 @@ calibration:
 enrollment_experiment:
   # PLAN.md Section 10.5 enrollment-length experiment day counts.
   day_lengths: [1, 2, 3, 5, 7]
+

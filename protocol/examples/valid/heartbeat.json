@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0.0",
+  "type": "HEARTBEAT",
+  "t_capture_us": 1234567892000,
+  "collector_uptime_ms": 84213000,
+  "dropped_events": 0,
+  "buffer_high_water": 128,
+  "seq": 884216
+}
+
+

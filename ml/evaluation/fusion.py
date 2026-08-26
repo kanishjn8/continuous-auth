@@ -11,8 +11,6 @@ confidence are risk-engine concerns, not an ML evaluation concern.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
 from ml.evaluation.cross_evaluation import CrossEvalResult
 from ml.features.schema import FeatureWindow
 from ml.training.common import ModelArtifact, ModelSchemaMismatchError, score_window
@@ -65,7 +63,9 @@ def fused_cross_evaluation(
         kbd_artifact = kbd_artifacts_by_user[user_id]
         mouse_artifact = mouse_artifacts_by_user[user_id]
 
-        genuine_scores = _fused_scores(kbd_artifact, mouse_artifact, test_windows_by_user.get(user_id, []), w_kbd, w_mouse)
+        genuine_scores = _fused_scores(
+            kbd_artifact, mouse_artifact, test_windows_by_user.get(user_id, []), w_kbd, w_mouse
+        )
 
         impostor_scores: dict[str, list[float]] = {}
         for other_id, other_windows in test_windows_by_user.items():
@@ -75,7 +75,9 @@ def fused_cross_evaluation(
             if scores:
                 impostor_scores[other_id] = scores
 
-        results[user_id] = CrossEvalResult(user_id=user_id, genuine_scores=genuine_scores, impostor_scores=impostor_scores)
+        results[user_id] = CrossEvalResult(
+            user_id=user_id, genuine_scores=genuine_scores, impostor_scores=impostor_scores
+        )
 
     return results
 

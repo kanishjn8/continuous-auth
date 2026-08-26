@@ -4,7 +4,7 @@
 "Public keystroke datasets contain no mouse data and no application
 context -- they can validate at most half of this architecture. They are
 not this project's results. They are a plumbing check." Every window built
-from this loader's output must carry ``Provenance.PUBLIC_DATASET``.
+from this loader's output must carry ``Provenance.PUBLIC``.
 
 ASSUMPTION (`[OPEN]` per PLAN.md Section 9.1: "Specific dataset choice --
 to be decided in Phase 0/1 after reviewing licensing and format"): no
@@ -38,10 +38,10 @@ from __future__ import annotations
 
 import csv
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
-from ml.features.schema import DeviceClass, KeyClass, KeyboardEvent
+from ml.features.schema import DeviceClass, KeyboardEvent, KeyClass
 
 _LEFT_HOME = set("asdf")
 _LEFT_UPPER = set("qwert")
@@ -134,10 +134,10 @@ def load_public_keystroke_csv(
     if not path.exists():
         raise FileNotFoundError(f"public keystroke dataset not found: {path}")
 
-    per_user_rows: dict[str, list[tuple[float, str]]] = defaultdict(list)
+    per_user_rows: dict[str, list[tuple[float, float, KeyClass]]] = defaultdict(list)
     seq_counters: dict[str, int] = defaultdict(int)
 
-    with open(path, "r", encoding="utf-8", newline="") as f:
+    with open(path, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         required = {user_col, press_time_col, release_time_col, key_col}
         if reader.fieldnames is None or not required.issubset(set(reader.fieldnames)):
@@ -157,7 +157,7 @@ def load_public_keystroke_csv(
                     f"press_time ({press_us}us) -- malformed row, refusing to silently clamp it"
                 )
             key_class = classify_char_to_key_class(row[key_col])
-            per_user_rows[user_id].append((press_us, release_us, key_class))  # type: ignore[arg-type]
+            per_user_rows[user_id].append((press_us, release_us, key_class))
 
     result: dict[str, list[KeyboardEvent]] = {}
     for user_id, rows in per_user_rows.items():

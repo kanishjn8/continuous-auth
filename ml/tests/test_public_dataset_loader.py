@@ -112,11 +112,11 @@ def test_loaded_stream_feeds_windowing_as_keyboard_only(ml_config, tmp_path):
         session_id="public-s1",
         segment_id="public-seg1",
         collection_day="2026-01-01",
-        provenance=Provenance.PUBLIC_DATASET,
+        provenance=Provenance.PUBLIC,
         config=ml_config,
     )
     assert windows
-    assert all(w.provenance == Provenance.PUBLIC_DATASET for w in windows)
+    assert all(w.provenance == Provenance.PUBLIC for w in windows)
     # PLAN.md Section 9.1: public datasets carry no mouse data -- structurally
     # verify no window from this source ever gets a mouse feature block.
     assert all(w.mouse_features is None for w in windows)
