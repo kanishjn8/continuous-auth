@@ -1,0 +1,75 @@
+# Operating-system metadata
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+# C/C++ and CMake build output
+build/
+out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+Testing/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.dSYM/
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+# JavaScript dependencies and reports
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+# Local configuration, credentials, and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.secret
+# Participant data and local runtime state — never commit
+/data/**
+**/data/raw/**
+**/data/processed/**
+**/data/frozen/**
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.audit.jsonl
+*.log
+logs/
+local-evidence/
+# Local model artifacts and experiment caches
+*.joblib
+*.pkl
+*.onnx
+artifacts/
+.cache/
