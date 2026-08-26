@@ -77,5 +77,5 @@ local-evidence/
 *.pkl
 *.onnx
 artifacts/
-models/
+/models/
 .cache/

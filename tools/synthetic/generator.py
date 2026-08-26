@@ -14,6 +14,7 @@ from ml.features.config import MLConfig
 from ml.features.extractor import extract_windows
 from ml.features.schema import (
     ContextEvent,
+    FeatureWindow,
     Heartbeat,
     KeyboardEvent,
     MouseButton,
@@ -25,13 +26,13 @@ from protocol.generated.python.contracts import (
     PROTOCOL_VERSION,
     DataProvenance,
     EventFrame,
-    FeatureWindow,
     KeyClass,
     ModalityScore,
     ModelStatus,
     RiskLevel,
     ScoreResult,
 )
+from protocol.generated.python.contracts import FeatureWindow as GeneratedFeatureWindow
 from tools.synthetic.config import (
     BehavioralProfile,
     ScenarioConfig,
@@ -41,7 +42,7 @@ from tools.synthetic.config import (
 from tools.synthetic.framing import FramedStreams, SyntheticEvent, build_framed_streams
 
 EVENT_ADAPTER: TypeAdapter[EventFrame] = TypeAdapter(EventFrame)
-FEATURE_ADAPTER: TypeAdapter[FeatureWindow] = TypeAdapter(FeatureWindow)
+FEATURE_ADAPTER: TypeAdapter[GeneratedFeatureWindow] = TypeAdapter(GeneratedFeatureWindow)
 SCORE_ADAPTER: TypeAdapter[ScoreResult] = TypeAdapter(ScoreResult)
 
 
