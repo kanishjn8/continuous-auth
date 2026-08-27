@@ -7,3 +7,11 @@ __pycache__/
 .venv/
 venv/
 data/
+
+# Trained model artifacts and generated datasets -- never committed.
+*.pkl
+*.joblib
+*.h5
+*.pt
+artifacts/
+models/
