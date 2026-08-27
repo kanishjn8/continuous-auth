@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <limits>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace continuous_auth::collector {
 namespace {
@@ -29,7 +31,12 @@ template <typename T>
 T positive_integer(const std::unordered_map<std::string, std::string>& values,
                    const std::string& name) {
   try {
-    const auto parsed = std::stoull(required(values, name));
+    const auto source = required(values, name);
+    std::size_t parsed_characters{};
+    const auto parsed = std::stoull(source, &parsed_characters);
+    if (parsed_characters != source.size()) {
+      throw ConfigError("collector configuration has invalid " + name);
+    }
     if (parsed == 0 || parsed > static_cast<unsigned long long>((std::numeric_limits<T>::max)())) {
       throw ConfigError("collector configuration has invalid " + name);
     }
@@ -44,8 +51,10 @@ T positive_integer(const std::unordered_map<std::string, std::string>& values,
 double positive_number(const std::unordered_map<std::string, std::string>& values,
                        const std::string& name) {
   try {
-    const auto parsed = std::stod(required(values, name));
-    if (!(parsed > 0)) {
+    const auto source = required(values, name);
+    std::size_t parsed_characters{};
+    const auto parsed = std::stod(source, &parsed_characters);
+    if (parsed_characters != source.size() || !std::isfinite(parsed) || !(parsed > 0)) {
       throw ConfigError("collector configuration has invalid " + name);
     }
     return parsed;
@@ -56,10 +65,23 @@ double positive_number(const std::unordered_map<std::string, std::string>& value
   }
 }
 
+bool local_identifier(const std::string& value) noexcept {
+  return !value.empty() &&
+         std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+           return std::isalnum(ch) != 0 || ch == '.' || ch == '_' || ch == '-';
+         });
+}
+
 }  // namespace
 
 CollectorSettings load_collector_settings(std::istream& input) {
   std::unordered_map<std::string, std::string> values;
+  const std::unordered_set<std::string> allowed{
+      "config_version",          "protocol_version",       "heartbeat_interval_seconds",
+      "buffer_capacity",        "reconnect_initial_seconds", "reconnect_max_seconds",
+      "reconnect_multiplier",   "poll_interval_ms",       "context_refresh_ms",
+      "device_refresh_seconds", "pipe_name",              "pause_event_name",
+      "overload_policy"};
   std::string line;
   while (std::getline(input, line)) {
     const auto comment = line.find('#');
@@ -68,12 +90,18 @@ CollectorSettings load_collector_settings(std::istream& input) {
     }
     const auto separator = line.find(':');
     if (separator == std::string::npos) {
+      if (!trim(line).empty()) throw ConfigError("collector configuration contains invalid YAML");
       continue;
     }
     const auto key = trim(line.substr(0, separator));
     const auto value = trim(line.substr(separator + 1));
-    if (!key.empty() && !value.empty()) {
-      values[key] = value;
+    if (key == "collector" && value.empty()) continue;
+    if (allowed.find(key) == allowed.end()) {
+      throw ConfigError("collector configuration contains an unknown field");
+    }
+    if (value.empty()) throw ConfigError("collector configuration contains an empty field");
+    if (!values.emplace(key, value).second) {
+      throw ConfigError("collector configuration contains a duplicate field");
     }
   }
 
@@ -91,6 +119,9 @@ CollectorSettings load_collector_settings(std::istream& input) {
       positive_integer<std::uint64_t>(values, "device_refresh_seconds");
   settings.pipe_name = required(values, "pipe_name");
   settings.pause_event_name = required(values, "pause_event_name");
+  if (!local_identifier(settings.pipe_name) || !local_identifier(settings.pause_event_name)) {
+    throw ConfigError("collector local identifiers contain unsupported characters");
+  }
   const auto overload = required(values, "overload_policy");
   if (overload == "DROP_OLDEST") {
     settings.overload_policy = OverloadPolicy::drop_oldest;

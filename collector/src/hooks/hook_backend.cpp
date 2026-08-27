@@ -132,9 +132,8 @@ private:
         const auto index = static_cast<std::size_t>(classified);
         const auto repeated = down && active_backend->class_down_[index];
         active_backend->class_down_[index] = down;
-        active_backend->publisher_.publish(KeyboardEvent{
-            std::string(kProtocolVersion), down ? "KEY_DOWN" : "KEY_UP",
-            static_cast<std::int64_t>(captured), classified, repeated,
+        active_backend->publisher_.publish_keyboard(CapturedKeyboardEvent{
+            down, static_cast<std::int64_t>(captured), classified, repeated,
             InputDeviceClass::kUnknown, active_backend->publisher_.current_app(),
             active_backend->publisher_.next_sequence()});
       }
@@ -146,27 +145,50 @@ private:
     if (code == HC_ACTION && active_backend != nullptr && !active_backend->publisher_.paused()) {
       const auto captured = active_backend->publisher_.capture_time_us();
       const auto* native_event = reinterpret_cast<const MSLLHOOKSTRUCT*>(payload);
-      std::string type;
+      std::optional<CapturedMouseType> type;
       std::optional<MouseButton> button;
+      std::int64_t horizontal{};
       std::int64_t vertical{};
       switch (message) {
-        case WM_MOUSEMOVE: type = "MOVE"; break;
-        case WM_LBUTTONDOWN: type = "BUTTON_DOWN"; button = MouseButton::kLeft; break;
-        case WM_LBUTTONUP: type = "BUTTON_UP"; button = MouseButton::kLeft; break;
-        case WM_RBUTTONDOWN: type = "BUTTON_DOWN"; button = MouseButton::kRight; break;
-        case WM_RBUTTONUP: type = "BUTTON_UP"; button = MouseButton::kRight; break;
-        case WM_MBUTTONDOWN: type = "BUTTON_DOWN"; button = MouseButton::kMiddle; break;
-        case WM_MBUTTONUP: type = "BUTTON_UP"; button = MouseButton::kMiddle; break;
+        case WM_MOUSEMOVE: type = CapturedMouseType::move; break;
+        case WM_LBUTTONDOWN:
+          type = CapturedMouseType::button_down;
+          button = MouseButton::kLeft;
+          break;
+        case WM_LBUTTONUP:
+          type = CapturedMouseType::button_up;
+          button = MouseButton::kLeft;
+          break;
+        case WM_RBUTTONDOWN:
+          type = CapturedMouseType::button_down;
+          button = MouseButton::kRight;
+          break;
+        case WM_RBUTTONUP:
+          type = CapturedMouseType::button_up;
+          button = MouseButton::kRight;
+          break;
+        case WM_MBUTTONDOWN:
+          type = CapturedMouseType::button_down;
+          button = MouseButton::kMiddle;
+          break;
+        case WM_MBUTTONUP:
+          type = CapturedMouseType::button_up;
+          button = MouseButton::kMiddle;
+          break;
         case WM_MOUSEWHEEL:
-          type = "SCROLL";
+          type = CapturedMouseType::scroll;
           vertical = static_cast<short>((native_event->mouseData >> 16U) & 0xffffU);
+          break;
+        case WM_MOUSEHWHEEL:
+          type = CapturedMouseType::scroll;
+          horizontal = static_cast<short>((native_event->mouseData >> 16U) & 0xffffU);
           break;
         default: break;
       }
-      if (captured != 0 && !type.empty()) {
-        active_backend->publisher_.publish(MouseEvent{
-            std::string(kProtocolVersion), type, static_cast<std::int64_t>(captured),
-            native_event->pt.x, native_event->pt.y, button, 0, vertical,
+      if (captured != 0 && type.has_value()) {
+        active_backend->publisher_.publish_mouse(CapturedMouseEvent{
+            *type, static_cast<std::int64_t>(captured), native_event->pt.x,
+            native_event->pt.y, button, horizontal, vertical,
             InputDeviceClass::kUnknown, active_backend->publisher_.current_app(),
             active_backend->publisher_.next_sequence()});
       }

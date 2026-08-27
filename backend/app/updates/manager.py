@@ -74,8 +74,21 @@ class CandidateBuild:
     candidate_metrics: ValidationMetrics
 
     def __post_init__(self) -> None:
+        if not self.profile_version.strip():
+            raise ValueError("candidate profile version must not be blank")
         if self.keyboard_artifact_version is None and self.mouse_artifact_version is None:
             raise ValueError("candidate profile must contain at least one modality artifact")
+        for modality, version, checksum in (
+            ("keyboard", self.keyboard_artifact_version, self.keyboard_checksum),
+            ("mouse", self.mouse_artifact_version, self.mouse_checksum),
+        ):
+            if (version is None) != (checksum is None):
+                raise ValueError(f"{modality} artifact version and checksum must occur together")
+            if checksum is not None and (
+                len(checksum) != 64
+                or any(character not in "0123456789abcdef" for character in checksum)
+            ):
+                raise ValueError(f"{modality} artifact checksum must be lowercase SHA-256")
 
     @property
     def aggregate_checksum(self) -> str:
@@ -292,7 +305,8 @@ class UpdateManager:
             eligible = tuple(
                 candidate
                 for candidate in assessed
-                if candidate.disposition is CandidateDisposition.ELIGIBLE
+                if candidate.disposition
+                in {CandidateDisposition.ELIGIBLE, CandidateDisposition.PROMOTED}
             )
             if not eligible:
                 report: dict[str, object] = {"code": "NO_ELIGIBLE_CANDIDATES"}
@@ -300,21 +314,37 @@ class UpdateManager:
                 return UpdateRunOutcome(run_id, "REJECTED", "NO_ELIGIBLE_CANDIDATES", None)
 
             promoted = tuple(
-                candidate.model_copy(
-                    update={
-                        "disposition": CandidateDisposition.PROMOTED,
-                        "reason_code": "PROMOTED_FOR_SCHEDULED_RETRAINING",
-                        "audit_revision": candidate.audit_revision + 1,
-                    }
+                (
+                    candidate
+                    if candidate.disposition is CandidateDisposition.PROMOTED
+                    else candidate.model_copy(
+                        update={
+                            "disposition": CandidateDisposition.PROMOTED,
+                            "reason_code": "PROMOTED_FOR_SCHEDULED_RETRAINING",
+                            "audit_revision": candidate.audit_revision + 1,
+                        }
+                    )
                 )
                 for candidate in eligible
             )
             for candidate in promoted:
+                if candidate.disposition is not CandidateDisposition.PROMOTED:
+                    raise AssertionError("scheduled training received an unpromoted candidate")
                 self.repository.save_candidate(candidate)
 
             build = candidate_builder(user_id, promoted)
             validation = self._validate(build)
             if not validation.accepted:
+                for candidate in promoted:
+                    self.repository.save_candidate(
+                        candidate.model_copy(
+                            update={
+                                "disposition": CandidateDisposition.REJECTED,
+                                "reason_code": "MODEL_VALIDATION_REGRESSION",
+                                "audit_revision": candidate.audit_revision + 1,
+                            }
+                        )
+                    )
                 report = {"code": validation.code, "validation": validation.__dict__}
                 self.repository.finish_run(run_id, "REJECTED", report)
                 return UpdateRunOutcome(run_id, "REJECTED", validation.code, None)

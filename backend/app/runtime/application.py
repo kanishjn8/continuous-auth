@@ -67,6 +67,9 @@ def create_synthetic_development_application(
     orchestration = load_orchestration_settings(orchestration_config)
     collector = load_collector_config(collector_config)
     profile_provider = DirectoryProfileProvider(storage, artifact_root)
+    update_manager = UpdateManager(
+        load_update_settings(updates_config), SQLiteUpdateRepository(storage)
+    )
     orchestrator = RuntimeOrchestrator(
         storage=storage,
         ingestion_settings=load_ingestion_settings(ingestion_config),
@@ -77,15 +80,14 @@ def create_synthetic_development_application(
         profile_provider=profile_provider,
         heartbeat_timeout_seconds=orchestration.heartbeat_timeout_seconds,
         measurement_capacity=orchestration.measurement_capacity,
-    )
-    update_manager = UpdateManager(
-        load_update_settings(updates_config), SQLiteUpdateRepository(storage)
+        update_manager=update_manager,
     )
     api_settings = load_api_settings(api_config)
     backend = SQLiteApiBackend(
         storage,
         active_user_provider=lambda: orchestrator.active_user_id,
         update_manager=update_manager,
+        shadow_mode_setter=orchestrator.set_shadow_mode,
     )
     app = create_api_app(
         settings=api_settings,

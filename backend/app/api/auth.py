@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -35,6 +36,7 @@ class LocalSessionAuth:
         self._ttl = ttl
         self._max_sessions = max_sessions
         self._sessions: dict[bytes, datetime] = {}
+        self._lock = threading.Lock()
 
     def _digest_secret(self, value: str) -> bytes:
         return hashlib.pbkdf2_hmac(
@@ -54,10 +56,11 @@ class LocalSessionAuth:
         current = (now or datetime.now(UTC)).astimezone(UTC)
         token = secrets.token_urlsafe(32)
         expires = current + self._ttl
-        self._sessions[self._digest_token(token)] = expires
-        self._discard_expired(current)
-        while len(self._sessions) > self._max_sessions:
-            self._sessions.pop(next(iter(self._sessions)))
+        with self._lock:
+            self._sessions[self._digest_token(token)] = expires
+            self._discard_expired(current)
+            while len(self._sessions) > self._max_sessions:
+                self._sessions.pop(next(iter(self._sessions)))
         return token, expires
 
     def authenticate(
@@ -67,15 +70,17 @@ class LocalSessionAuth:
             return None
         current = (now or datetime.now(UTC)).astimezone(UTC)
         digest = self._digest_token(token)
-        expires = self._sessions.get(digest)
-        if expires is None or expires <= current:
-            self._sessions.pop(digest, None)
-            return None
+        with self._lock:
+            expires = self._sessions.get(digest)
+            if expires is None or expires <= current:
+                self._sessions.pop(digest, None)
+                return None
         return SessionIdentity(expires)
 
     def revoke(self, token: str | None) -> None:
         if token:
-            self._sessions.pop(self._digest_token(token), None)
+            with self._lock:
+                self._sessions.pop(self._digest_token(token), None)
 
     def _discard_expired(self, now: datetime) -> None:
         expired = [digest for digest, expires in self._sessions.items() if expires <= now]

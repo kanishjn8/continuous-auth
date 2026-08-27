@@ -10,7 +10,7 @@ the session may see risk changes. It is never part of the enforcement path.
 - 64-bit Windows 10/11
 - Python 3.11 or newer (`py` launcher available)
 - CMake 3.20+ and Visual Studio C++ build tools
-- Node.js/npm for package creation only
+- Node.js 20.19+ (or 22.12+) and npm for package creation only
 
 ## Create and install a package
 
@@ -22,6 +22,9 @@ python tools/guardrails/check.py
 python -m pytest
 powershell -ExecutionPolicy Bypass -File deployment/windows/package.ps1 -Version 0.2.0
 ```
+
+The packaging command emits the archive and a SHA-256 sidecar. Verify the archive
+against that sidecar before extraction and retain both with the clean-machine evidence.
 
 Extract the resulting archive on the clean test machine and run:
 

@@ -219,6 +219,11 @@ def test_enrollment_calibration_shadow_and_active_transitions() -> None:
         calibration_windows=settings.enrollment.calibration_windows,
     )
     assert state.state == UserState.ACTIVE
+    engine.set_shadow_mode(True)
+    administrative_shadow = engine.process(_request(1.0, 3))
+    assert administrative_shadow.decision is not None
+    assert administrative_shadow.decision.shadow_mode is True
+    assert administrative_shadow.decision.enforcement_applied is False
 
 
 def test_model_failure_is_fail_open_loud_and_degraded() -> None:

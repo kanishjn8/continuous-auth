@@ -7,7 +7,7 @@ import logging
 import sqlite3
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -34,7 +34,7 @@ from protocol.generated.python.contracts import (
 from .audit import AuditLog
 from .config import StorageSettings
 from .database import SQLiteDatabase
-from .errors import StorageError, StorageUnavailableError
+from .errors import StorageError, StorageIntegrityError, StorageUnavailableError
 from .permissions import restrict_directory, restrict_file
 from .retention import RetentionResult, run_retention
 
@@ -162,9 +162,12 @@ class StorageService:
             code=code,
             operation=operation,
             occurred_at_utc=_utc_text(),
-            detail=f"{type(exc).__name__}: {exc}",
+            # Exception text can contain local paths or database values. Keep the
+            # operational signal useful without allowing those values to cross
+            # the storage boundary.
+            detail=type(exc).__name__,
         )
-        LOGGER.error("%s during %s: %s", code, operation, event.detail)
+        LOGGER.error("%s during %s (%s)", code, operation, event.detail)
         if sink is not None:
             sink(event)
 
@@ -656,6 +659,91 @@ class StorageService:
 
         self._guard("store_alert", work)
 
+    def acknowledge_alert(self, alert_id: str) -> bool:
+        """Acknowledge an alert and atomically queue the administrative audit record."""
+
+        def work() -> bool:
+            occurred = _utc_text()
+            audit_id = str(uuid.uuid4())
+            payload = _json(
+                {
+                    "schema_version": PROTOCOL_VERSION,
+                    "alert_id": alert_id,
+                    "acknowledged": True,
+                }
+            )
+            with self.database.transaction() as connection:
+                updated = connection.execute(
+                    "UPDATE alerts SET acknowledged = 1 WHERE alert_id = ?", (alert_id,)
+                )
+                if updated.rowcount != 1:
+                    return False
+                self._queue_audit(
+                    connection,
+                    record_id=f"admin:{audit_id}",
+                    event_type="ALERT_ACKNOWLEDGED",
+                    occurred_at_utc=occurred,
+                    correlation_id=audit_id,
+                    payload_json=payload,
+                )
+            self.flush_audit()
+            return True
+
+        return self._guard("acknowledge_alert", work)
+
+    def shadow_mode_enabled(self) -> bool:
+        """Load the persisted administrative shadow-mode state."""
+
+        def work() -> bool:
+            with self.database.connection() as connection:
+                row = connection.execute(
+                    "SELECT metadata_value FROM storage_metadata WHERE metadata_key = ?",
+                    ("admin_shadow_mode",),
+                ).fetchone()
+            if row is None:
+                return False
+            value = str(row["metadata_value"])
+            if value not in {"0", "1"}:
+                raise StorageIntegrityError("stored shadow-mode state is invalid")
+            return value == "1"
+
+        return self._guard("shadow_mode_enabled", work)
+
+    def set_shadow_mode(self, enabled: bool) -> None:
+        """Persist and audit an administrative shadow-mode change atomically."""
+
+        def work() -> None:
+            occurred = _utc_text()
+            audit_id = str(uuid.uuid4())
+            payload = _json(
+                {
+                    "schema_version": PROTOCOL_VERSION,
+                    "enabled": enabled,
+                }
+            )
+            with self.database.transaction() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO storage_metadata(metadata_key, metadata_value, updated_at_utc)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(metadata_key) DO UPDATE SET
+                        metadata_value = excluded.metadata_value,
+                        updated_at_utc = excluded.updated_at_utc
+                    """,
+                    ("admin_shadow_mode", "1" if enabled else "0", occurred),
+                )
+                self._queue_audit(
+                    connection,
+                    record_id=f"admin:{audit_id}",
+                    event_type="SHADOW_MODE_CHANGED",
+                    occurred_at_utc=occurred,
+                    correlation_id=audit_id,
+                    payload_json=payload,
+                )
+            self.flush_audit()
+
+        self._guard("set_shadow_mode", work)
+
     def store_model(self, artifact: ModelArtifact) -> None:
         def work() -> None:
             self._enforce_provenance(artifact.provenance)
@@ -839,14 +927,27 @@ class StorageService:
     def run_retention(self, *, now: datetime | None = None) -> RetentionResult:
         def work() -> RetentionResult:
             retention = self.settings.retention
-            return run_retention(
+            observed = now or _utc_now()
+            result = run_retention(
                 self.database,
                 self.audit,
-                now=now or _utc_now(),
+                now=observed,
                 feature_window_days=retention.feature_window_days,
                 score_days=retention.score_days,
                 audit_compress_after_days=retention.audit_compress_after_days,
                 audit_delete_after_days=retention.audit_delete_after_days,
             )
+            audit_id = str(uuid.uuid4())
+            with self.database.transaction() as connection:
+                self._queue_audit(
+                    connection,
+                    record_id=f"retention:{audit_id}",
+                    event_type="RETENTION_COMPLETED",
+                    occurred_at_utc=result.completed_at_utc,
+                    correlation_id=audit_id,
+                    payload_json=_json(asdict(result)),
+                )
+            self.flush_audit()
+            return result
 
         return self._guard("run_retention", work)

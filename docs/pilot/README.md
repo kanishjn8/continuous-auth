@@ -6,6 +6,9 @@ pseudonym, record enrollment versions beneath ignored `data/collection/`, demons
 the pause control, and brief the participant to report device changes. Do not place
 names, contact details, or signed forms in this repository.
 
+Start from the [participant brief template](participant-brief-template.md) and
+[operator checklist](operator-checklist.md); both require human approval before use.
+
 The collector records content-free key classes, mouse movement/button/scroll geometry,
 capture-time monotonic timestamps, foreground process name/category, input-device class,
 resolution/DPI, and health counters. It does not record key identity, typed content,

@@ -39,6 +39,10 @@ testpaths = [
   "ml/tests",
   "protocol/tests",
   "tools/guardrails/tests",
+  "tools/benchmarks/tests",
+  "tools/collection/tests",
+  "tools/evaluation/tests",
+  "tools/faultinjection/tests",
   "tools/synthetic/tests",
 ]
 

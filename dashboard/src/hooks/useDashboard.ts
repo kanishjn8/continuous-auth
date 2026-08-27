@@ -5,7 +5,10 @@ import { dashboardConfig } from "../config";
 import { isEnvelope } from "../protocol";
 import { dashboardReducer, initialDashboardState } from "../state/dashboard";
 
-export function useDashboard(authenticated: boolean, onUnauthorized: () => void) {
+export function useDashboard(
+  authenticated: boolean,
+  onUnauthorized: () => void,
+) {
   const [state, dispatch] = useReducer(dashboardReducer, initialDashboardState);
   const cursor = useRef(-1);
 
@@ -29,7 +32,9 @@ export function useDashboard(authenticated: boolean, onUnauthorized: () => void)
       dispatch({ type: "CONNECTING" });
       const scheme = window.location.protocol === "https:" ? "wss" : "ws";
       const query = cursor.current >= 0 ? `?cursor=${cursor.current}` : "";
-      socket = new WebSocket(`${scheme}://${window.location.host}/v1/stream${query}`);
+      socket = new WebSocket(
+        `${scheme}://${window.location.host}/v1/stream${query}`,
+      );
       socket.onopen = () => {
         reconnectDelay = dashboardConfig.reconnect_initial_ms;
         resetStaleTimer();
@@ -37,12 +42,16 @@ export function useDashboard(authenticated: boolean, onUnauthorized: () => void)
       socket.onmessage = (event) => {
         try {
           const envelope: unknown = JSON.parse(String(event.data));
-          if (!isEnvelope(envelope)) throw new Error("invalid live-update envelope");
+          if (!isEnvelope(envelope))
+            throw new Error("invalid live-update envelope");
           cursor.current = envelope.stream_seq;
           dispatch({ type: "STREAM", envelope, receivedAt: Date.now() });
           resetStaleTimer();
         } catch {
-          dispatch({ type: "OFFLINE", error: "A live update failed contract validation." });
+          dispatch({
+            type: "OFFLINE",
+            error: "A live update failed contract validation.",
+          });
           socket?.close();
         }
       };
@@ -52,9 +61,15 @@ export function useDashboard(authenticated: boolean, onUnauthorized: () => void)
           onUnauthorized();
           return;
         }
-        dispatch({ type: "OFFLINE", error: "Live monitoring is disconnected." });
+        dispatch({
+          type: "OFFLINE",
+          error: "Live monitoring is disconnected.",
+        });
         reconnectTimer = window.setTimeout(connect, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 2, dashboardConfig.reconnect_max_ms);
+        reconnectDelay = Math.min(
+          reconnectDelay * 2,
+          dashboardConfig.reconnect_max_ms,
+        );
       };
     };
 
@@ -76,8 +91,13 @@ export function useDashboard(authenticated: boolean, onUnauthorized: () => void)
         connect();
       })
       .catch((error: unknown) => {
-        if (error instanceof ApiFailure && error.status === 401) onUnauthorized();
-        else dispatch({ type: "OFFLINE", error: "Backend state could not be loaded." });
+        if (error instanceof ApiFailure && error.status === 401)
+          onUnauthorized();
+        else
+          dispatch({
+            type: "OFFLINE",
+            error: "Backend state could not be loaded.",
+          });
       });
 
     return () => {

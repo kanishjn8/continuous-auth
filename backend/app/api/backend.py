@@ -91,12 +91,15 @@ class SQLiteApiBackend:
             ).fetchone()
         state = UserState(user["state"])
         level = RiskLevel(risk["risk_level"]) if risk is not None else RiskLevel.UNAVAILABLE
+        shadow_mode = self.storage.shadow_mode_enabled()
         return CurrentState(
             schema_version="1.0.0",
             user_id=user_id,
             user_state=state,
             risk_level=level,
-            protection_available=state is UserState.ACTIVE and level is not RiskLevel.UNAVAILABLE,
+            protection_available=(
+                state is UserState.ACTIVE and level is not RiskLevel.UNAVAILABLE and not shadow_mode
+            ),
             last_check_at=risk["stored_at_utc"] if risk is not None else user["updated_at_utc"],
         )
 
@@ -209,11 +212,7 @@ class SQLiteApiBackend:
         return PageResult(items, len(rows) > limit)
 
     def acknowledge_alert(self, alert_id: str) -> None:
-        with self.storage.database.transaction() as connection:
-            updated = connection.execute(
-                "UPDATE alerts SET acknowledged = 1 WHERE alert_id = ?", (alert_id,)
-            )
-        if updated.rowcount != 1:
+        if not self.storage.acknowledge_alert(alert_id):
             raise ResourceNotFound("alert was not found")
 
     def list_updates(
@@ -273,6 +272,7 @@ class SQLiteApiBackend:
     def set_shadow_mode(self, enabled: bool) -> None:
         if self.shadow_mode_setter is None:
             raise ResourceConflict("shadow-mode administration is unavailable")
+        self.storage.set_shadow_mode(enabled)
         self.shadow_mode_setter(enabled)
 
     def rollback(self, user_id: str) -> str:

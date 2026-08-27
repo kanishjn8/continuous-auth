@@ -17,9 +17,11 @@ class WindowsNamedPipeServer:
     """Own one local inbound pipe instance used by the native collector client."""
 
     _PIPE_ACCESS_INBOUND = 0x00000001
+    _FILE_FLAG_FIRST_PIPE_INSTANCE = 0x00080000
     _PIPE_TYPE_BYTE = 0x00000000
     _PIPE_READMODE_BYTE = 0x00000000
     _PIPE_WAIT = 0x00000000
+    _PIPE_REJECT_REMOTE_CLIENTS = 0x00000008
     _PIPE_UNLIMITED_INSTANCES = 255
     _ERROR_PIPE_CONNECTED = 535
     _ERROR_BROKEN_PIPE = 109
@@ -77,8 +79,11 @@ class WindowsNamedPipeServer:
         endpoint = rf"\\.\pipe\{self.name}"
         handle = self._kernel32.CreateNamedPipeW(
             endpoint,
-            self._PIPE_ACCESS_INBOUND,
-            self._PIPE_TYPE_BYTE | self._PIPE_READMODE_BYTE | self._PIPE_WAIT,
+            self._PIPE_ACCESS_INBOUND | self._FILE_FLAG_FIRST_PIPE_INSTANCE,
+            self._PIPE_TYPE_BYTE
+            | self._PIPE_READMODE_BYTE
+            | self._PIPE_WAIT
+            | self._PIPE_REJECT_REMOTE_CLIENTS,
             self._PIPE_UNLIMITED_INSTANCES,
             self.buffer_bytes,
             self.buffer_bytes,

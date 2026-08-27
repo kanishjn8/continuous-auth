@@ -31,8 +31,11 @@ class ValidationResult:
 def validate_payload(payload: bytes) -> ValidationResult:
     try:
         document = json.loads(payload)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return ValidationResult(None, ValidationIssue("MALFORMED_JSON", str(exc)))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return ValidationResult(
+            None,
+            ValidationIssue("MALFORMED_JSON", "payload is not valid UTF-8 JSON"),
+        )
     if not isinstance(document, dict):
         return ValidationResult(
             None,
@@ -42,7 +45,7 @@ def validate_payload(payload: bytes) -> ValidationResult:
     if not isinstance(event_type, str):
         return ValidationResult(
             None,
-            ValidationIssue("INVALID_EVENT_SCHEMA", f"unknown event type {event_type!r}"),
+            ValidationIssue("INVALID_EVENT_SCHEMA", "event type is not a string"),
         )
     try:
         event: IngestedEvent
@@ -61,8 +64,11 @@ def validate_payload(payload: bytes) -> ValidationResult:
         else:
             return ValidationResult(
                 None,
-                ValidationIssue("INVALID_EVENT_SCHEMA", f"unknown event type {event_type!r}"),
+                ValidationIssue("INVALID_EVENT_SCHEMA", "event type is not supported"),
             )
-    except ValidationError as exc:
-        return ValidationResult(None, ValidationIssue("INVALID_EVENT_SCHEMA", str(exc)))
+    except ValidationError:
+        return ValidationResult(
+            None,
+            ValidationIssue("INVALID_EVENT_SCHEMA", "event does not satisfy the C1 schema"),
+        )
     return ValidationResult(event, None)

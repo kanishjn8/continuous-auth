@@ -11,7 +11,8 @@ import type {
   WebSocketEnvelope,
 } from "../protocol";
 
-export type Connectivity = "CONNECTING" | "ONLINE" | "STALE" | "OFFLINE" | "REPLAY";
+export type Connectivity =
+  "CONNECTING" | "ONLINE" | "STALE" | "OFFLINE" | "REPLAY";
 
 export interface DashboardState {
   readonly current: CurrentState | null;
@@ -42,8 +43,18 @@ export const initialDashboardState: DashboardState = {
 };
 
 export type DashboardAction =
-  | { readonly type: "LOADED"; readonly value: Omit<DashboardState, "connectivity" | "lastSequence" | "lastMessageAt" | "error"> }
-  | { readonly type: "STREAM"; readonly envelope: WebSocketEnvelope; readonly receivedAt: number }
+  | {
+      readonly type: "LOADED";
+      readonly value: Omit<
+        DashboardState,
+        "connectivity" | "lastSequence" | "lastMessageAt" | "error"
+      >;
+    }
+  | {
+      readonly type: "STREAM";
+      readonly envelope: WebSocketEnvelope;
+      readonly receivedAt: number;
+    }
   | { readonly type: "CONNECTING" }
   | { readonly type: "OFFLINE"; readonly error: string }
   | { readonly type: "STALE" }
@@ -57,7 +68,10 @@ function appendDecision(
   return [...decisions, decision].slice(-dashboardConfig.timeline_limit);
 }
 
-export function dashboardReducer(state: DashboardState, action: DashboardAction): DashboardState {
+export function dashboardReducer(
+  state: DashboardState,
+  action: DashboardAction,
+): DashboardState {
   switch (action.type) {
     case "LOADED":
       return { ...state, ...action.value, error: null };
@@ -66,7 +80,9 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
     case "OFFLINE":
       return { ...state, connectivity: "OFFLINE", error: action.error };
     case "STALE":
-      return state.connectivity === "ONLINE" ? { ...state, connectivity: "STALE" } : state;
+      return state.connectivity === "ONLINE"
+        ? { ...state, connectivity: "STALE" }
+        : state;
     case "REPLAY":
       return state.connectivity === "REPLAY"
         ? state
@@ -82,14 +98,23 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
       return {
         ...state,
         alerts: state.alerts.map((alert) =>
-          alert.alert_id === action.alertId ? { ...alert, acknowledged: true } : alert,
+          alert.alert_id === action.alertId
+            ? { ...alert, acknowledged: true }
+            : alert,
         ),
       };
     case "STREAM": {
       const { envelope } = action;
       if (envelope.stream_seq <= state.lastSequence) return state;
-      if (state.lastSequence >= 0 && envelope.stream_seq > state.lastSequence + 1) {
-        return { ...state, connectivity: "STALE", error: "Live update gap detected; resynchronizing." };
+      if (
+        state.lastSequence >= 0 &&
+        envelope.stream_seq > state.lastSequence + 1
+      ) {
+        return {
+          ...state,
+          connectivity: "STALE",
+          error: "Live update gap detected; resynchronizing.",
+        };
       }
       const base: DashboardState = {
         ...state,
@@ -119,13 +144,19 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
                 user_id: decision.user_id,
                 user_state: decision.user_state,
                 risk_level: decision.risk_level,
-                protection_available: decision.user_state === "ACTIVE",
+                protection_available:
+                  decision.user_state === "ACTIVE" &&
+                  decision.risk_level !== "UNAVAILABLE" &&
+                  !decision.shadow_mode,
               }
             : base.current,
         };
       }
       if (envelope.event_type === "ALERT") {
-        return { ...base, alerts: [envelope.payload as AlertRecord, ...base.alerts] };
+        return {
+          ...base,
+          alerts: [envelope.payload as AlertRecord, ...base.alerts],
+        };
       }
       if (envelope.event_type === "STATE") {
         return { ...base, current: envelope.payload as CurrentState };

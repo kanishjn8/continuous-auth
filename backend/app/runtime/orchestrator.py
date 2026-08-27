@@ -8,7 +8,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from backend.app.decisions.adapters import EnforcementCoordinator
+from backend.app.decisions.adapters import (
+    EnforcementCoordinator,
+    EnforcementNotice,
+    VerificationRecord,
+)
 from backend.app.ingestion.config import IngestionSettings
 from backend.app.ingestion.pipeline import IngestionPipeline
 from backend.app.ingestion.types import (
@@ -25,6 +29,7 @@ from backend.app.risk.engine import RiskEngine
 from backend.app.risk.state import UserStateMachine
 from backend.app.risk.types import DecisionInput, RiskAlert
 from backend.app.storage.service import StorageService
+from backend.app.updates.manager import SegmentEvidence, UpdateManager
 from ml.features.config import MLConfig
 from ml.features.extractor import window_config_from_ml_config
 from ml.features.schema import ContextEvent, FeatureWindow, Heartbeat, KeyboardEvent, MouseEvent
@@ -39,6 +44,8 @@ from protocol.generated.python.contracts import (
     DeviceMetadataEvent,
     Health,
     Metrics,
+    RiskLevel,
+    ScoreResult,
     StreamEventType,
     UserState,
     VerificationAnchor,
@@ -72,6 +79,7 @@ class RuntimeOrchestrator:
         heartbeat_timeout_seconds: float,
         measurement_capacity: int,
         enforcement: EnforcementCoordinator | None = None,
+        update_manager: UpdateManager | None = None,
     ) -> None:
         if provenance not in {DataProvenance.SYNTHETIC, DataProvenance.TEAM, DataProvenance.PILOT}:
             raise ValueError("live runtime provenance must be synthetic, team, or pilot")
@@ -85,10 +93,15 @@ class RuntimeOrchestrator:
         self.profile_provider = profile_provider
         self.heartbeat_timeout_seconds = heartbeat_timeout_seconds
         self.measurements = RuntimeMeasurements(measurement_capacity)
-        self.enforcement = enforcement or EnforcementCoordinator({}, store=storage)
+        self.enforcement = enforcement or EnforcementCoordinator(
+            {}, store=storage, notice_sink=self._on_enforcement_notice
+        )
+        self.update_manager = update_manager
+        self._shadow_mode = storage.shadow_mode_enabled()
         self._active_user: str | None = None
         self._session_wall_anchor: datetime | None = None
         self._builders: dict[str, WindowBuilder] = {}
+        self._segment_gap_baseline: dict[str, int] = {}
         self._risk_engine: RiskEngine | None = None
         self._scoring: ModelScoringService | None = None
         self._profile_available = False
@@ -107,6 +120,13 @@ class RuntimeOrchestrator:
     @property
     def active_user_id(self) -> str | None:
         return self._active_user
+
+    def set_shadow_mode(self, enabled: bool) -> None:
+        """Apply the already-persisted administrative mode to current and future sessions."""
+
+        self._shadow_mode = enabled
+        if self._risk_engine is not None:
+            self._risk_engine.set_shadow_mode(enabled)
 
     def _drain_emissions(self) -> tuple[StreamEmission, ...]:
         emissions = tuple(self._emissions)
@@ -161,6 +181,7 @@ class RuntimeOrchestrator:
             settings=self.risk_settings,
             state_machine=UserStateMachine(self.risk_settings.enrollment, initial=state),
         )
+        self._risk_engine.set_shadow_mode(self._shadow_mode)
         self._active_user = user_id
         self._session_wall_anchor = observed.astimezone(UTC)
         lifecycle = self.pipeline.start_session(
@@ -191,6 +212,7 @@ class RuntimeOrchestrator:
         self._profile_available = False
         self._profile_failure_reported = False
         self._builders.clear()
+        self._segment_gap_baseline.clear()
         return self._drain_emissions()
 
     def feed(
@@ -211,6 +233,7 @@ class RuntimeOrchestrator:
         self.pipeline.shutdown()
         self._active_user = None
         self._builders.clear()
+        self._segment_gap_baseline.clear()
         return self._drain_emissions()
 
     def _on_lifecycle(self, event: LifecycleEvent) -> None:
@@ -241,6 +264,7 @@ class RuntimeOrchestrator:
                 device_resolution=self._device_resolution,
             )
             self._builders[event.segment_id] = builder
+            self._segment_gap_baseline[event.segment_id] = self.pipeline.counters.missing_sequences
         elif event.kind == "SEGMENT_ENDED":
             assert event.segment_id is not None and event.t_capture_us is not None
             closed_builder = (
@@ -251,9 +275,123 @@ class RuntimeOrchestrator:
                 if trailing is not None:
                     self._process_window(trailing)
             self.storage.end_segment(event.segment_id, event.t_capture_us, event.reason)
+            self._submit_segment_candidate(event.segment_id)
         elif event.kind == "SESSION_ENDED":
             assert event.session_id is not None
             self.storage.end_session(event.session_id)
+
+    def _submit_segment_candidate(self, segment_id: str) -> None:
+        if self.update_manager is None:
+            self._segment_gap_baseline.pop(segment_id, None)
+            return
+        gap_baseline = self._segment_gap_baseline.pop(segment_id, 0)
+        try:
+            with self.storage.database.connection() as connection:
+                segment = connection.execute(
+                    """
+                    SELECT segments.session_id, sessions.user_id
+                    FROM segments JOIN sessions USING(session_id)
+                    WHERE segments.segment_id = ?
+                    """,
+                    (segment_id,),
+                ).fetchone()
+                if segment is None:
+                    raise ValueError("completed segment metadata is unavailable")
+                risk_rows = connection.execute(
+                    """
+                    SELECT risk_level FROM risk_events
+                    WHERE segment_id = ? ORDER BY t_decision_us
+                    """,
+                    (segment_id,),
+                ).fetchall()
+                score_rows = connection.execute(
+                    """
+                    SELECT scores.score_json FROM scores
+                    JOIN feature_windows USING(window_id)
+                    WHERE feature_windows.segment_id = ?
+                    """,
+                    (segment_id,),
+                ).fetchall()
+                enforcement_triggered = bool(
+                    connection.execute(
+                        """
+                        SELECT EXISTS(
+                            SELECT 1 FROM decisions JOIN risk_events USING(decision_id)
+                            WHERE risk_events.segment_id = ?
+                              AND decisions.enforcement_applied = 1
+                        )
+                        """,
+                        (segment_id,),
+                    ).fetchone()[0]
+                )
+                first_segment = connection.execute(
+                    """
+                    SELECT segment_id FROM segments WHERE session_id = ?
+                    ORDER BY started_at_capture_us LIMIT 1
+                    """,
+                    (segment["session_id"],),
+                ).fetchone()
+                allow_entry_anchor = (
+                    first_segment is not None and first_segment["segment_id"] == segment_id
+                )
+                anchor = connection.execute(
+                    """
+                    SELECT * FROM verification_anchors
+                    WHERE user_id = ? AND session_id = ?
+                      AND (segment_id = ? OR (? = 1 AND segment_id IS NULL))
+                    ORDER BY authenticated_at_utc DESC LIMIT 1
+                    """,
+                    (
+                        segment["user_id"],
+                        segment["session_id"],
+                        segment_id,
+                        int(allow_entry_anchor),
+                    ),
+                ).fetchone()
+            verification = (
+                None
+                if anchor is None
+                else VerificationRecord(
+                    anchor_id=anchor["anchor_id"],
+                    user_id=anchor["user_id"],
+                    session_id=anchor["session_id"],
+                    segment_id=anchor["segment_id"],
+                    anchor_type=VerificationAnchor(anchor["anchor_type"]),
+                    evidence_reference=anchor["evidence_reference"],
+                    authenticated_at=datetime.fromisoformat(
+                        str(anchor["authenticated_at_utc"]).replace("Z", "+00:00")
+                    ),
+                )
+            )
+            scored_windows = sum(
+                1
+                for row in score_rows
+                if (
+                    (score := ScoreResult.model_validate_json(row["score_json"])).keyboard.available
+                    or score.mouse.available
+                )
+            )
+            self.update_manager.submit_segment(
+                SegmentEvidence(
+                    user_id=segment["user_id"],
+                    session_id=segment["session_id"],
+                    segment_id=segment_id,
+                    completed_at=datetime.now(UTC),
+                    risk_levels=tuple(RiskLevel(row["risk_level"]) for row in risk_rows),
+                    scored_windows=scored_windows,
+                    enforcement_triggered=enforcement_triggered,
+                    unexplained_gap=self.pipeline.counters.missing_sequences > gap_baseline,
+                    verification=verification,
+                )
+            )
+        except Exception:
+            self._on_ingestion_availability(
+                AvailabilityEvent(
+                    code="UPDATE_CANDIDATE_ADMISSION_FAILED",
+                    component="update_manager",
+                    detail="completed segment could not be evaluated for update eligibility",
+                )
+            )
 
     def _on_event(self, attributed: AttributedEvent) -> None:
         event = attributed.event
@@ -431,6 +569,18 @@ class RuntimeOrchestrator:
             alert_type=AlertType.AVAILABILITY,
             severity="HIGH",
             code=event.code,
+            occurred_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            acknowledged=False,
+        )
+        self.storage.store_alert(alert)
+        self._emissions.append(StreamEmission(StreamEventType.ALERT, alert))
+
+    def _on_enforcement_notice(self, notice: EnforcementNotice) -> None:
+        alert = Alert(
+            alert_id=f"alert-{uuid.uuid4()}",
+            alert_type=AlertType.AVAILABILITY,
+            severity=notice.severity,
+            code=notice.code,
             occurred_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             acknowledged=False,
         )

@@ -127,6 +127,7 @@ def test_validation_rejects_malformed_unknown_version_and_extra_fields(
     document["typed_content"] = "forbidden"
     extra_field = validate_payload(json.dumps(document).encode()).issue
     assert extra_field is not None and extra_field.code == "INVALID_EVENT_SCHEMA"
+    assert "forbidden" not in extra_field.detail
 
 
 def test_sequence_tracker_gap_duplicate_late_and_no_wrap_policy() -> None:

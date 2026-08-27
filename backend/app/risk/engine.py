@@ -58,6 +58,12 @@ class RiskEngine:
         self._smoothed: float | None = None
         self._risk_level = RiskLevel.LOW
         self._last_decision_us: int | None = None
+        self._shadow_mode = False
+
+    def set_shadow_mode(self, enabled: bool) -> None:
+        """Toggle administrative observation-only mode without stopping monitoring."""
+
+        self._shadow_mode = enabled
 
     def _emit_alert(self, alert: RiskAlert) -> None:
         if self._alert_sink is not None:
@@ -145,7 +151,7 @@ class RiskEngine:
             reason_code="FAIL_OPEN_COMPONENT_UNAVAILABLE",
             threshold_config_version=self.settings.config_version,
             config_checksum=self.settings.config_checksum,
-            shadow_mode=False,
+            shadow_mode=self._shadow_mode,
             enforcement_applied=False,
         )
         if self._decision_sink is not None:
@@ -182,7 +188,7 @@ class RiskEngine:
                 reason_code="INSUFFICIENT_EVIDENCE_HOLD",
                 threshold_config_version=self.settings.config_version,
                 config_checksum=self.settings.config_checksum,
-                shadow_mode=state == UserState.CALIBRATING,
+                shadow_mode=state == UserState.CALIBRATING or self._shadow_mode,
                 enforcement_applied=False,
             )
             if self._decision_sink is not None:
@@ -206,7 +212,7 @@ class RiskEngine:
         candidate, high_count = self._candidate_level()
         self._risk_level = self._with_hysteresis(candidate)
 
-        enforcement_enabled = state == UserState.ACTIVE
+        enforcement_enabled = state == UserState.ACTIVE and not self._shadow_mode
         policy = self._policy.decide(
             level=self._risk_level,
             high_count=high_count,
@@ -264,7 +270,7 @@ class RiskEngine:
             reason_code=reason,
             threshold_config_version=self.settings.config_version,
             config_checksum=self.settings.config_checksum,
-            shadow_mode=state == UserState.CALIBRATING,
+            shadow_mode=state == UserState.CALIBRATING or self._shadow_mode,
             enforcement_applied=applied,
         )
         trace = DecisionTrace(

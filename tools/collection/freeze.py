@@ -35,13 +35,30 @@ def _window_digest(window: WindowSummary) -> str:
 def _partition_days(days: list[str], settings: CollectionSettings) -> dict[str, str]:
     if len(days) < settings.min_distinct_days:
         raise FreezeError("participant has fewer than the configured minimum distinct days")
-    train_end = max(1, round(len(days) * settings.training_fraction))
-    validation_count = max(1, round(len(days) * settings.validation_fraction))
-    validation_end = min(len(days) - 1, train_end + validation_count)
-    if train_end >= validation_end or validation_end >= len(days):
+    if len(days) < 3:
         raise FreezeError(
             "configured split fractions cannot produce three non-empty day partitions"
         )
+
+    # Reserve one whole day for every partition before distributing the rest.
+    # This preserves day-disjointness even at the configured minimum of three
+    # days, where direct rounding can accidentally make one partition empty.
+    fractions = (
+        settings.training_fraction,
+        settings.validation_fraction,
+        settings.evaluation_fraction,
+    )
+    remaining = len(days) - 3
+    quotas = [remaining * fraction for fraction in fractions]
+    extras = [int(quota) for quota in quotas]
+    for index in sorted(
+        range(len(quotas)),
+        key=lambda value: (quotas[value] - extras[value], fractions[value]),
+        reverse=True,
+    )[: remaining - sum(extras)]:
+        extras[index] += 1
+    train_end = 1 + extras[0]
+    validation_end = train_end + 1 + extras[1]
     return {
         day: (
             "TRAIN"

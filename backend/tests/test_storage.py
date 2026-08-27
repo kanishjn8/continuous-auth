@@ -289,6 +289,10 @@ def test_c2_c3_c4_c6_health_records_persist_and_decision_audit_matches(
             }
         )
     )
+    assert service.acknowledge_alert("synthetic-alert")
+    assert not service.acknowledge_alert("missing-alert")
+    service.set_shadow_mode(True)
+    assert service.shadow_mode_enabled()
     service.store_model(
         ModelArtifact.model_validate(
             {
@@ -363,6 +367,14 @@ def test_c2_c3_c4_c6_health_records_persist_and_decision_audit_matches(
         ) == decision.model_dump(mode="json")
         assert connection.execute("SELECT count(*) FROM decisions").fetchone()[0] == 1
         assert connection.execute("SELECT count(*) FROM alerts").fetchone()[0] == 1
+        assert connection.execute("SELECT acknowledged FROM alerts").fetchone()[0] == 1
+        assert (
+            connection.execute(
+                "SELECT metadata_value FROM storage_metadata "
+                "WHERE metadata_key = 'admin_shadow_mode'"
+            ).fetchone()[0]
+            == "1"
+        )
         assert connection.execute("SELECT count(*) FROM models").fetchone()[0] == 1
         assert connection.execute("SELECT count(*) FROM update_candidates").fetchone()[0] == 1
         assert connection.execute("SELECT count(*) FROM system_metrics").fetchone()[0] == 2
@@ -378,6 +390,8 @@ def test_c2_c3_c4_c6_health_records_persist_and_decision_audit_matches(
         record for record in records if record["record_id"] == "risk-decision:synthetic-decision"
     )
     assert audited_decision["payload"] == decision.model_dump(mode="json")
+    assert "ALERT_ACKNOWLEDGED" in {record["event_type"] for record in records}
+    assert "SHADOW_MODE_CHANGED" in {record["event_type"] for record in records}
     service.audit.verify_all()
     assert events == []
 
@@ -459,18 +473,50 @@ def test_retention_deletes_bounded_rows_and_reports_counts(
     service, _ = storage
     _seed(service)
     service.store_score(_score())
+    service.store_risk_decision(_decision())
+    service.store_alert(
+        Alert(
+            alert_id="retention-alert",
+            alert_type="AVAILABILITY",
+            severity="HIGH",
+            code="SYNTHETIC_RETENTION",
+            occurred_at="2026-01-01T00:00:00Z",
+            acknowledged=False,
+        )
+    )
+    service.record_metrics(
+        "collector",
+        datetime(2026, 1, 1, tzinfo=UTC),
+        Metrics(
+            collector_cpu_percent=None,
+            collector_memory_bytes=None,
+            dropped_events=0,
+            latency_us={},
+        ),
+    )
     now = datetime.now(UTC)
     expired = (now - timedelta(days=8)).isoformat().replace("+00:00", "Z")
     with service.database.transaction() as connection:
         connection.execute("UPDATE feature_windows SET stored_at_utc = ?", (expired,))
         connection.execute("UPDATE scores SET stored_at_utc = ?", (expired,))
+        connection.execute("UPDATE risk_events SET stored_at_utc = ?", (expired,))
+        connection.execute("UPDATE alerts SET occurred_at_utc = ?", (expired,))
+        connection.execute("UPDATE system_metrics SET observed_at_utc = ?", (expired,))
+        connection.execute("UPDATE audit_outbox SET occurred_at_utc = ?", (expired,))
     result = service.run_retention(now=now)
     assert result.status == "COMPLETED"
     assert result.feature_windows_deleted == 1
     assert result.scores_deleted == 1
+    assert result.risk_events_deleted == 1
+    assert result.alerts_deleted == 1
+    assert result.system_metrics_deleted == 1
+    assert result.audit_outbox_deleted > 0
     with service.database.connection() as connection:
         assert connection.execute("SELECT count(*) FROM feature_windows").fetchone()[0] == 0
         assert connection.execute("SELECT count(*) FROM scores").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM risk_events").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM alerts").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM system_metrics").fetchone()[0] == 0
 
 
 def test_daily_audit_rotation_compression_deletion_and_integrity(tmp_path: Path) -> None:

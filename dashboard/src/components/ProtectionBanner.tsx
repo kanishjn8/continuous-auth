@@ -8,7 +8,11 @@ function connectionLabel(value: Connectivity): string {
   return "Backend unavailable";
 }
 
-export function ProtectionBanner({ state }: { readonly state: DashboardState }) {
+export function ProtectionBanner({
+  state,
+}: {
+  readonly state: DashboardState;
+}) {
   const protectedNow =
     state.connectivity === "ONLINE" &&
     state.current?.protection_available === true &&
@@ -19,7 +23,11 @@ export function ProtectionBanner({ state }: { readonly state: DashboardState }) 
       role="status"
       aria-live="polite"
     >
-      <strong>{protectedNow ? "Protection active" : "Protection unavailable or unverified"}</strong>
+      <strong>
+        {protectedNow
+          ? "Protection active"
+          : "Protection unavailable or unverified"}
+      </strong>
       <span>{connectionLabel(state.connectivity)}</span>
       {state.error ? <span>{state.error}</span> : null}
     </section>

@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Literal, Protocol
 
 from protocol.generated.python.contracts import (
     DecisionAction,
@@ -100,7 +100,7 @@ class ActionOutcome:
 
 @dataclass(frozen=True)
 class EnforcementNotice:
-    severity: str
+    severity: Literal["LOW", "MEDIUM", "HIGH"]
     code: str
     decision_id: str
 
@@ -175,7 +175,9 @@ class EnforcementCoordinator:
 
     def execute(self, decision: RiskDecision) -> ActionOutcome:
         now = _utc_now()
-        if decision.user_state is not UserState.ACTIVE or not decision.enforcement_applied:
+        if decision.user_state is not UserState.ACTIVE or (
+            not decision.enforcement_applied and decision.action is not DecisionAction.CONTINUE
+        ):
             return self._record(
                 ActionOutcome(
                     decision.decision_id,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -24,7 +24,7 @@ class _CollectionValues(BaseModel):
     min_full_modality_fraction: float = Field(ge=0, le=1)
     max_observed_gap_hours: float = Field(gt=0)
     scheduled_anchor_interval_hours: float = Field(gt=0)
-    eligible_provenance: list[DataProvenance] = Field(min_length=1)
+    eligible_provenance: list[Annotated[DataProvenance, Field(strict=False)]] = Field(min_length=1)
 
     @model_validator(mode="after")
     def participant_provenance_only(self) -> _CollectionValues:
