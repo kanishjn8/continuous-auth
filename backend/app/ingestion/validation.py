@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import ValidationError
 
 from ml.features.schema import ContextEvent, Heartbeat, KeyboardEvent, MouseEvent
+from protocol.generated.python.contracts import AppRegistryEvent, DeviceMetadataEvent
 
 from .types import IngestedEvent
 
@@ -53,6 +54,10 @@ def validate_payload(payload: bytes) -> ValidationResult:
             event = ContextEvent.model_validate(document)
         elif event_type == "HEARTBEAT":
             event = Heartbeat.model_validate(document)
+        elif event_type == "APP_REGISTRY":
+            event = AppRegistryEvent.model_validate(document)
+        elif event_type == "DEVICE_METADATA":
+            event = DeviceMetadataEvent.model_validate(document)
         else:
             return ValidationResult(
                 None,

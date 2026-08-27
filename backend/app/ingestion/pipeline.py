@@ -137,6 +137,7 @@ class IngestionPipeline:
                 )
                 continue
             lifecycle.extend(changes)
+            self._emit_lifecycle(changes)
             if len(self._raw_ring) == self._raw_ring.maxlen:
                 self._counters.raw_ring_overwrites += 1
             self._raw_ring.append(attributed)
@@ -145,7 +146,6 @@ class IngestionPipeline:
             if self._event_sink is not None:
                 self._event_sink(attributed)
 
-        self._emit_lifecycle(lifecycle)
         return IngestionBatch(
             events=tuple(accepted),
             lifecycle=tuple(lifecycle),

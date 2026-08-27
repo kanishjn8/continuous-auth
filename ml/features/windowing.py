@@ -90,6 +90,13 @@ class _ContextTimeline:
         fractions = {k: v / duration for k, v in totals.items()}
         return fractions, switches
 
+    def add(self, event: ContextEvent) -> None:
+        """Add a live focus change while preserving capture-time ordering."""
+
+        index = bisect.bisect_right(self._starts, event.t_capture_us)
+        self._starts.insert(index, event.t_capture_us)
+        self._categories.insert(index, event.category)
+
 
 def _dominant_device_class(
     kbd: Sequence[KeyboardEvent], mouse: Sequence[MouseEvent]
@@ -259,6 +266,14 @@ class WindowBuilder:
             ):
                 closed.append(self._close(ev.t_capture_us))
         return closed
+
+    def push_context_event(self, event: ContextEvent) -> None:
+        self._timeline.add(event)
+
+    def set_device_resolution(self, width: int, height: int) -> None:
+        if width <= 0 or height <= 0:
+            raise ValueError("device resolution dimensions must be positive")
+        self.device_resolution = (width, height)
 
     def flush(self) -> FeatureWindow | None:
         """Close and return the trailing partial window, if any events are pending."""

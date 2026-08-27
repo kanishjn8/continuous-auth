@@ -1,0 +1,14 @@
+# Development-only T-018 parameters. O10 remains open pending the required
+# longitudinal experiments and human security review; these values only make
+# synthetic gate and rollback paths executable.
+config_version: t018-synthetic-development-v1
+protocol_version: 1.0.0
+development_only: true
+
+update_manager:
+  min_promotable_windows: 10
+  quarantine_days: 7
+  retraining_cadence_days: 7
+  regression_tolerance: 0.02
+  scheduled_anchor_interval_seconds: 14400
+  retained_model_versions: 3

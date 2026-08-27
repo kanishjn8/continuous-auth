@@ -7,8 +7,11 @@ from datetime import datetime
 from typing import Literal, TypeAlias
 
 from ml.features.schema import ContextEvent, Heartbeat, KeyboardEvent, MouseEvent
+from protocol.generated.python.contracts import AppRegistryEvent, DeviceMetadataEvent
 
-IngestedEvent: TypeAlias = KeyboardEvent | MouseEvent | ContextEvent | Heartbeat
+IngestedEvent: TypeAlias = (
+    KeyboardEvent | MouseEvent | ContextEvent | Heartbeat | AppRegistryEvent | DeviceMetadataEvent
+)
 InputEvent: TypeAlias = KeyboardEvent | MouseEvent
 
 

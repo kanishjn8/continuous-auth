@@ -283,6 +283,7 @@ def _heartbeat_events(scenario: ScenarioConfig) -> list[SyntheticEvent]:
                 collector_uptime_ms=(current - scenario.t_start_us) // 1000,
                 dropped_events=0,
                 buffer_high_water=0,
+                collection_paused=False,
                 seq=0,
             )
         )

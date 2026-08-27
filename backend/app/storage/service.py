@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -37,6 +37,9 @@ from .database import SQLiteDatabase
 from .errors import StorageError, StorageUnavailableError
 from .permissions import restrict_directory, restrict_file
 from .retention import RetentionResult, run_retention
+
+if TYPE_CHECKING:
+    from backend.app.decisions.adapters import ActionOutcome, VerificationRecord
 
 LOGGER = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -329,6 +332,76 @@ class StorageService:
 
         self._guard("create_segment", work)
 
+    def end_segment(
+        self,
+        segment_id: str,
+        ended_at_capture_us: int,
+        reason: str,
+    ) -> None:
+        def work() -> None:
+            occurred = _utc_text()
+            payload = _json(
+                {
+                    "schema_version": PROTOCOL_VERSION,
+                    "segment_id": segment_id,
+                    "ended_at_capture_us": ended_at_capture_us,
+                    "reason": reason,
+                }
+            )
+            with self.database.transaction() as connection:
+                updated = connection.execute(
+                    """
+                    UPDATE segments SET ended_at_capture_us = ?
+                    WHERE segment_id = ? AND ended_at_capture_us IS NULL
+                    """,
+                    (ended_at_capture_us, segment_id),
+                )
+                if updated.rowcount != 1:
+                    raise StorageUnavailableError("segment close references no open segment")
+                self._queue_audit(
+                    connection,
+                    record_id=f"segment-end:{segment_id}",
+                    event_type="SEGMENT_ENDED",
+                    occurred_at_utc=occurred,
+                    correlation_id=segment_id,
+                    payload_json=payload,
+                )
+            self.flush_audit()
+
+        self._guard("end_segment", work)
+
+    def end_session(self, session_id: str, *, ended_at: datetime | None = None) -> None:
+        def work() -> None:
+            occurred = _utc_text(ended_at)
+            payload = _json(
+                {
+                    "schema_version": PROTOCOL_VERSION,
+                    "session_id": session_id,
+                    "ended_at_utc": occurred,
+                }
+            )
+            with self.database.transaction() as connection:
+                updated = connection.execute(
+                    """
+                    UPDATE sessions SET ended_at_utc = ?
+                    WHERE session_id = ? AND ended_at_utc IS NULL
+                    """,
+                    (occurred, session_id),
+                )
+                if updated.rowcount != 1:
+                    raise StorageUnavailableError("session close references no open session")
+                self._queue_audit(
+                    connection,
+                    record_id=f"session-end:{session_id}",
+                    event_type="SESSION_ENDED",
+                    occurred_at_utc=occurred,
+                    correlation_id=session_id,
+                    payload_json=payload,
+                )
+            self.flush_audit()
+
+        self._guard("end_session", work)
+
     def store_feature_window(self, window: FeatureWindow) -> None:
         def work() -> None:
             self._enforce_provenance(window.provenance)
@@ -465,6 +538,90 @@ class StorageService:
             self.flush_audit()
 
         self._guard("store_risk_decision", work)
+
+    def record_action_outcome(self, outcome: ActionOutcome) -> None:
+        """Attach the real adapter result to a previously audited policy decision."""
+
+        def work() -> None:
+            occurred = _utc_text(outcome.occurred_at)
+            payload = _json(
+                {
+                    "decision_id": outcome.decision_id,
+                    "requested_action": _enum_value(outcome.requested_action),
+                    "status": _enum_value(outcome.status),
+                    "code": outcome.code,
+                    "occurred_at_utc": occurred,
+                }
+            )
+            with self.database.transaction() as connection:
+                updated = connection.execute(
+                    """
+                    UPDATE decisions
+                    SET outcome = ?, outcome_at_utc = ?,
+                        enforcement_applied = CASE WHEN ? = 'SUCCEEDED' THEN 1 ELSE 0 END
+                    WHERE decision_id = ?
+                    """,
+                    (outcome.code, occurred, _enum_value(outcome.status), outcome.decision_id),
+                )
+                if updated.rowcount != 1:
+                    raise StorageUnavailableError("action outcome references an unknown decision")
+                self._queue_audit(
+                    connection,
+                    record_id=f"action-outcome:{outcome.decision_id}",
+                    event_type="ACTION_OUTCOME",
+                    occurred_at_utc=occurred,
+                    correlation_id=outcome.decision_id,
+                    payload_json=payload,
+                )
+            self.flush_audit()
+
+        self._guard("record_action_outcome", work)
+
+    def record_verification(self, verification: VerificationRecord) -> None:
+        """Persist only independently evidenced A1-A3 anchors and an opaque proof digest."""
+
+        def work() -> None:
+            occurred = _utc_text(verification.authenticated_at)
+            payload = _json(
+                {
+                    "anchor_id": verification.anchor_id,
+                    "user_id": verification.user_id,
+                    "session_id": verification.session_id,
+                    "segment_id": verification.segment_id,
+                    "anchor_type": _enum_value(verification.anchor_type),
+                    "authenticated_at_utc": occurred,
+                }
+            )
+            with self.database.transaction() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO verification_anchors(
+                        anchor_id, user_id, session_id, segment_id, anchor_type,
+                        evidence_reference, authenticated_at_utc, schema_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        verification.anchor_id,
+                        verification.user_id,
+                        verification.session_id,
+                        verification.segment_id,
+                        _enum_value(verification.anchor_type),
+                        verification.evidence_reference,
+                        occurred,
+                        PROTOCOL_VERSION,
+                    ),
+                )
+                self._queue_audit(
+                    connection,
+                    record_id=f"verification:{verification.anchor_id}",
+                    event_type="VERIFICATION_ANCHOR",
+                    occurred_at_utc=occurred,
+                    correlation_id=verification.anchor_id,
+                    payload_json=payload,
+                )
+            self.flush_audit()
+
+        self._guard("record_verification", work)
 
     def store_alert(self, alert: Alert) -> None:
         def work() -> None:

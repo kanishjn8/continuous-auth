@@ -1,34 +1,53 @@
 # Continuous Authentication Using Behavioral Biometrics
 
-Local-first, Windows-primary continuous verification based on content-free keyboard
-and mouse dynamics. The authoritative architecture is in [PLAN.md](PLAN.md), and team
-ownership is in [TASK_DELEGATION.md](TASK_DELEGATION.md).
+Local-first, Windows-primary continuous verification using content-free keyboard and
+mouse dynamics. Shared contracts live only in `protocol/`, feature computation lives
+only in `ml/features/`, and every operational/security tunable lives in `config/`.
 
-## Current status
+## Implemented software baseline
 
-T-002 foundation work is in progress. Protocol v1 schemas, deterministic Python/C++
-binding generation, and privacy/architecture guardrails are the first implementation
-slice. The Windows global-hook feasibility evidence in T-001 remains a parallel human
-and Kanish review gate; it does not block these platform-independent contracts.
+- Generated JSON Schema/Pydantic/C++ C1–C9 contracts and privacy guardrails.
+- Deterministic synthetic fixtures; bounded native Windows hooks, QPC timestamps,
+  content-free key classification, context/device metadata, pause, heartbeat, and named
+  pipe transport.
+- Ordered ingestion, shared feature windows, independent per-user models, calibration,
+  context confidence, risk/state policy, fail-open enforcement adapters, SQLite/audit,
+  retention, and model-update promotion/rollback.
+- Authenticated loopback REST/WebSocket API with bounded replay/snapshot resync and a
+  six-view React dashboard.
+- Consent-aware collection health, immutable day-disjoint freeze, full robustness
+  matrix ledger, threshold/config freeze, runtime benchmark helpers, E1/E2 calculations,
+  and Windows packaging scripts.
 
-## Local checks
+## Local verification
 
-Requires Python 3.11+.
+Python 3.11+ is required; Node and a C++17 compiler are needed for their components.
 
 ```powershell
+python -m pip install -e ".[backend,dev]"
 python protocol/codegen/generate.py --check
 python tools/guardrails/check.py
 python -m pytest
+python -m mypy backend/app ml tools
+cmake -S collector -B build/collector -DBUILD_TESTING=ON
+cmake --build build/collector --config Release
+ctest --test-dir build/collector -C Release --output-on-failure
+cd dashboard
+npm ci
+npm run typecheck
+npm test
+npm run build
 ```
 
-The native collector and React dashboard skeletons have their own build instructions
-in their directories once their toolchains are installed.
+See `docs/deployment/windows.md` for packaging, `docs/pilot/` for collection operations,
+`docs/update-manager.md` for G1–G6, and `docs/evaluation.md` for evidence rules.
 
-## Privacy boundary
+## Evidence still requiring humans
 
-The IPC contract carries key classes and capture-time monotonic timestamps, never key
-identity or typed content. Participant data, databases, credentials, logs, and model
-artifacts are excluded from version control.
-
+The repository cannot manufacture consent, participant collection days, real Windows
+hook/timing evidence, security approval for OS enforcement actions, informed mimicry,
+live takeover, clean-machine/soak evidence, or academic review. Development thresholds
+are explicitly unreviewed and no accuracy is claimed. Participant data, databases,
+credentials, logs, evidence, and sensitive model artifacts remain ignored by Git.
 
 

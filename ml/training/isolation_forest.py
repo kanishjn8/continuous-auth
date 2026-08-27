@@ -8,12 +8,13 @@ outside config).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from ml.features.config import MLConfig
 from ml.features.schema import FeatureWindow
 from ml.training.common import Modality, ModelArtifact, train_one_class_model
 from ml.training.model_wrappers import IsolationForestWrapper
+from protocol.generated.python.contracts import UpdateCandidate
 
 
 def train_user_modality_isolation_forest(
@@ -21,6 +22,7 @@ def train_user_modality_isolation_forest(
     modality: Modality,
     windows: Sequence[FeatureWindow],
     config: MLConfig,
+    promoted_candidates: Mapping[str, UpdateCandidate] | None = None,
 ) -> ModelArtifact:
     hp = config.raw["isolation_forest"]
     hyperparameters = {
@@ -37,6 +39,7 @@ def train_user_modality_isolation_forest(
         model_type="isolation_forest",
         hyperparameters=hyperparameters,
         min_windows=config.raw["per_user_normalization"]["min_baseline_windows"],
+        promoted_candidates=promoted_candidates,
     )
 
 
@@ -44,6 +47,7 @@ def train_user_profile(
     user_id: str,
     windows: Sequence[FeatureWindow],
     config: MLConfig,
+    promoted_candidates: Mapping[str, UpdateCandidate] | None = None,
 ) -> dict[Modality, ModelArtifact]:
     """Train both modality models for one user, skipping a modality that has
     too little data rather than failing the whole profile (PLAN.md ADR-006:
@@ -56,7 +60,7 @@ def train_user_profile(
     for modality in ("keyboard", "mouse"):
         try:
             profile[modality] = train_user_modality_isolation_forest(
-                user_id, modality, windows, config
+                user_id, modality, windows, config, promoted_candidates
             )
         except InsufficientDataError:
             continue

@@ -204,19 +204,22 @@ def test_migration_creates_required_tables_wal_indexes_and_is_idempotent(
         "app_registry",
         "system_metrics",
         "storage_metadata",
+        "verification_anchors",
+        "model_profiles",
+        "update_runs",
     }
     assert required <= _table_names(service)
     with service.database.connection() as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
-        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 3
         versions = dict(
             connection.execute(
                 "SELECT metadata_key, metadata_value FROM storage_metadata"
             ).fetchall()
         )
         assert versions == {
-            "database_schema_version": "2",
+            "database_schema_version": "3",
             "protocol_version": "1.0.0",
             "storage_config_version": "storage-test-1",
         }
@@ -342,7 +345,12 @@ def test_c2_c3_c4_c6_health_records_persist_and_decision_audit_matches(
     service.record_health(
         "storage",
         observed,
-        Health(status="HEALTHY", components={"storage": "HEALTHY"}, heartbeat_age_ms=0),
+        Health(
+            status="HEALTHY",
+            components={"storage": "HEALTHY"},
+            heartbeat_age_ms=0,
+            collection_paused=False,
+        ),
     )
 
     with service.database.connection() as connection:

@@ -1,0 +1,8 @@
+config_version: runtime-benchmark-development-v1
+protocol_version: 1.0.0
+development_only: true
+
+benchmark:
+  sample_interval_seconds: 1.0
+  duration_seconds: 300.0
+  warmup_seconds: 30.0

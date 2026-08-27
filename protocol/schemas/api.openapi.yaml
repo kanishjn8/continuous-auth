@@ -11,6 +11,53 @@ servers:
 security:
   - localSession: []
 paths:
+  /v1/auth/login:
+    post:
+      operationId: loginLocalSession
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLoginRequest"
+      responses:
+        "200":
+          description: Short-lived local dashboard session established
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/auth/session:
+    get:
+      operationId: getLocalSession
+      responses:
+        "200":
+          description: Current local dashboard session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/auth/logout:
+    post:
+      operationId: logoutLocalSession
+      responses:
+        "200":
+          description: Local dashboard session revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        default:
+          $ref: "#/components/responses/ApiError"
   /v1/state:
     get:
       operationId: getCurrentState
@@ -108,6 +155,45 @@ paths:
                 $ref: "#/components/schemas/AlertPage"
         default:
           $ref: "#/components/responses/ApiError"
+  /v1/alerts/{alert_id}/acknowledge:
+    parameters:
+      - name: alert_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    post:
+      operationId: acknowledgeAlert
+      responses:
+        "200":
+          description: Alert acknowledgement recorded and audited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminActionResponse"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/updates:
+    get:
+      operationId: listUpdateCandidates
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Quarantined, eligible, promoted, and rejected candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateCandidatePage"
+        default:
+          $ref: "#/components/responses/ApiError"
   /v1/metrics:
     get:
       operationId: getMetrics
@@ -160,6 +246,20 @@ paths:
                     type: boolean
                   correlation_id:
                     type: string
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/admin/models/{user_id}/rollback:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      operationId: rollbackActiveProfile
+      responses:
+        "200":
+          description: Previous retained profile activated atomically
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminActionResponse"
         default:
           $ref: "#/components/responses/ApiError"
 components:
@@ -225,5 +325,12 @@ components:
       $ref: "contracts.schema.json#/$defs/Health"
     ApiError:
       $ref: "contracts.schema.json#/$defs/ApiError"
-
+    AuthLoginRequest:
+      $ref: "contracts.schema.json#/$defs/AuthLoginRequest"
+    AuthSession:
+      $ref: "contracts.schema.json#/$defs/AuthSession"
+    UpdateCandidatePage:
+      $ref: "contracts.schema.json#/$defs/UpdateCandidatePage"
+    AdminActionResponse:
+      $ref: "contracts.schema.json#/$defs/AdminActionResponse"
 

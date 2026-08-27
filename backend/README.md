@@ -1,18 +1,26 @@
-# Backend skeleton
+# Backend
 
-The backend is a Python 3.11+ package. Its T-002 executable surface currently exposes
-only non-sensitive component metadata and a health probe; ingestion, persistence, risk,
-and production API behavior remain their separately owned tasks.
+The backend validates length-prefixed C1 frames, preserves capture timestamps and event
+ordering, assigns sessions/segments, calls the single `ml/features` implementation,
+scores the active per-user profile, evaluates context/risk, runs state-gated fail-open
+actions, persists approved aggregates/audit, and publishes authenticated C7/C8 state.
+
+The complete Windows synthetic-development process is:
 
 ```powershell
-python -m pip install -e ".[backend,dev]"
-python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8765
-python -m pytest backend/tests
+$env:CA_DASHBOARD_SECRET = Read-Host "Temporary local dashboard secret"
+python -m backend.app.runtime.cli --synthetic-user synthetic-user `
+  --artifact-root "$env:LOCALAPPDATA/ContinuousAuthentication/Development/models" `
+  --dashboard-directory dashboard/dist
 ```
 
-The service binds to loopback in the documented command. API authentication is defined
-by C7 and will be implemented in T-016 before any administrative or history surface is
-made available.
+It binds to `127.0.0.1`, stores only `SYNTHETIC` provenance with the development storage
+profile, and starts the Windows named-pipe server. Participant provenance needs a
+separately reviewed storage/collection configuration and a reviewed A1 authentication
+integration; the synthetic launcher deliberately cannot enable it.
 
+For API-only diagnostics, `backend.app.main:app` exposes process liveness. API/dashboard
+failure is outside the enforcement path. Model absence/corruption and storage/action
+failure remain loud and fail-open.
 
 

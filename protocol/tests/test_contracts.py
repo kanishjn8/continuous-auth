@@ -132,6 +132,12 @@ def test_configuration_schema_enforces_security_boundaries_without_defaults() ->
             "buffer_capacity": 1,
             "reconnect_initial_seconds": 1,
             "reconnect_max_seconds": 1,
+            "reconnect_multiplier": 2,
+            "poll_interval_ms": 1,
+            "context_refresh_ms": 1,
+            "device_refresh_seconds": 1,
+            "pipe_name": "continuous-auth-test",
+            "pause_event_name": "continuous-auth-test-pause",
             "overload_policy": "DROP_OLDEST",
         },
         "ingestion": {
@@ -194,6 +200,11 @@ def test_configuration_schema_enforces_security_boundaries_without_defaults() ->
             "bind_host": "127.0.0.1",
             "port": 8765,
             "session_ttl_seconds": 1,
+            "secret_hash_iterations": 100000,
+            "max_sessions": 1,
+            "default_page_size": 1,
+            "max_page_size": 2,
+            "snapshot_alert_limit": 1,
             "websocket_client_capacity": 1,
             "replay_event_capacity": 1,
         },
@@ -267,7 +278,7 @@ def test_openapi_declares_required_authenticated_surfaces_and_safe_errors() -> N
     document = yaml.safe_load(text)
     assert document["openapi"] == "3.1.0"
     assert document["security"] == [{"localSession": []}]
-    assert len(document["paths"]) == 8
+    assert len(document["paths"]) == 14
     required_tokens = (
         "openapi: 3.1.0",
         "security:",
@@ -277,6 +288,9 @@ def test_openapi_declares_required_authenticated_surfaces_and_safe_errors() -> N
         "/v1/alerts:",
         "/v1/metrics:",
         "/v1/health:",
+        "/v1/auth/login:",
+        "/v1/updates:",
+        "/v1/admin/models/{user_id}/rollback:",
         "correlation_id:",
     )
     assert all(token in text for token in required_tokens)

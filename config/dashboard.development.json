@@ -1,0 +1,8 @@
+{
+  "config_version": "t017-local-development-v1",
+  "reconnect_initial_ms": 500,
+  "reconnect_max_ms": 10000,
+  "stale_after_ms": 15000,
+  "timeline_limit": 120,
+  "replay_step_ms": 800
+}

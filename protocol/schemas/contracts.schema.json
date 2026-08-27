@@ -145,7 +145,7 @@
       "additionalProperties": false,
       "required": [
         "schema_version", "type", "t_capture_us", "collector_uptime_ms",
-        "dropped_events", "buffer_high_water", "seq"
+        "dropped_events", "buffer_high_water", "collection_paused", "seq"
       ],
       "properties": {
         "schema_version": {"const": "1.0.0"},
@@ -154,6 +154,7 @@
         "collector_uptime_ms": {"type": "integer", "minimum": 0},
         "dropped_events": {"type": "integer", "minimum": 0},
         "buffer_high_water": {"type": "integer", "minimum": 0},
+        "collection_paused": {"type": "boolean"},
         "seq": {"type": "integer", "minimum": 0}
       }
     },
@@ -172,12 +173,54 @@
         "category": {"$ref": "#/$defs/ApplicationCategory"}
       }
     },
+    "AppRegistryEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "type", "t_capture_us", "app_id", "process_name",
+        "category", "seq"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "type": {"const": "APP_REGISTRY"},
+        "t_capture_us": {"type": "integer", "minimum": 0},
+        "app_id": {"type": "integer", "minimum": 0},
+        "process_name": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^\\\\/:\\u0000-\\u001f]+$"
+        },
+        "category": {"$ref": "#/$defs/ApplicationCategory"},
+        "seq": {"type": "integer", "minimum": 0}
+      }
+    },
+    "DeviceMetadataEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "type", "t_capture_us", "keyboard_device_class",
+        "mouse_device_class", "screen_width_px", "screen_height_px", "dpi", "seq"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "type": {"const": "DEVICE_METADATA"},
+        "t_capture_us": {"type": "integer", "minimum": 0},
+        "keyboard_device_class": {"$ref": "#/$defs/InputDeviceClass"},
+        "mouse_device_class": {"$ref": "#/$defs/InputDeviceClass"},
+        "screen_width_px": {"type": "integer", "minimum": 1},
+        "screen_height_px": {"type": "integer", "minimum": 1},
+        "dpi": {"type": "integer", "minimum": 1},
+        "seq": {"type": "integer", "minimum": 0}
+      }
+    },
     "EventFrame": {
       "oneOf": [
         {"$ref": "#/$defs/KeyboardEvent"},
         {"$ref": "#/$defs/MouseEvent"},
         {"$ref": "#/$defs/ContextEvent"},
-        {"$ref": "#/$defs/Heartbeat"}
+        {"$ref": "#/$defs/Heartbeat"},
+        {"$ref": "#/$defs/AppRegistryEvent"},
+        {"$ref": "#/$defs/DeviceMetadataEvent"}
       ]
     },
     "KeyboardFeatures": {
@@ -494,7 +537,9 @@
         "user_id": {"type": "string", "minLength": 1},
         "segment_id": {"type": "string", "minLength": 1},
         "gate_evidence": {"$ref": "#/$defs/GateEvidence"},
-        "verification_anchor": {"$ref": "#/$defs/VerificationAnchor"},
+        "verification_anchor": {
+          "anyOf": [{"$ref": "#/$defs/VerificationAnchor"}, {"type": "null"}]
+        },
         "quarantined_at": {"type": "string", "format": "date-time"},
         "incident_recorded": {"type": "boolean"},
         "disposition": {"$ref": "#/$defs/CandidateDisposition"},
@@ -512,6 +557,26 @@
         "correlation_id": {"type": "string", "minLength": 1}
       }
     },
+    "AuthLoginRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local_secret"],
+      "properties": {
+        "local_secret": {"type": "string", "minLength": 1, "maxLength": 1024}
+      }
+    },
+    "AuthSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authenticated", "expires_at", "correlation_id"],
+      "properties": {
+        "authenticated": {"type": "boolean"},
+        "expires_at": {
+          "anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]
+        },
+        "correlation_id": {"type": "string", "minLength": 1}
+      }
+    },
     "CurrentState": {
       "type": "object",
       "additionalProperties": false,
@@ -521,7 +586,9 @@
       ],
       "properties": {
         "schema_version": {"const": "1.0.0"},
-        "user_id": {"type": "string", "minLength": 1},
+        "user_id": {
+          "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+        },
         "user_state": {"$ref": "#/$defs/UserState"},
         "risk_level": {"$ref": "#/$defs/RiskLevel"},
         "protection_available": {"type": "boolean"},
@@ -597,13 +664,32 @@
         "page": {"$ref": "#/$defs/PageMetadata"}
       }
     },
+    "UpdateCandidatePage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "page"],
+      "properties": {
+        "items": {"type": "array", "items": {"$ref": "#/$defs/UpdateCandidate"}},
+        "page": {"$ref": "#/$defs/PageMetadata"}
+      }
+    },
+    "AdminActionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "code", "correlation_id"],
+      "properties": {
+        "accepted": {"type": "boolean"},
+        "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"},
+        "correlation_id": {"type": "string", "minLength": 1}
+      }
+    },
     "Metrics": {
       "type": "object",
       "additionalProperties": false,
       "required": ["collector_cpu_percent", "collector_memory_bytes", "dropped_events", "latency_us"],
       "properties": {
-        "collector_cpu_percent": {"type": "number", "minimum": 0},
-        "collector_memory_bytes": {"type": "integer", "minimum": 0},
+        "collector_cpu_percent": {"anyOf": [{"type": "number", "minimum": 0}, {"type": "null"}]},
+        "collector_memory_bytes": {"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]},
         "dropped_events": {"type": "integer", "minimum": 0},
         "latency_us": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}}
       }
@@ -611,14 +697,15 @@
     "Health": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "components", "heartbeat_age_ms"],
+      "required": ["status", "components", "heartbeat_age_ms", "collection_paused"],
       "properties": {
         "status": {"type": "string", "enum": ["HEALTHY", "DEGRADED", "UNAVAILABLE"]},
         "components": {
           "type": "object",
           "additionalProperties": {"type": "string", "enum": ["HEALTHY", "DEGRADED", "UNAVAILABLE"]}
         },
-        "heartbeat_age_ms": {"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]}
+        "heartbeat_age_ms": {"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]},
+        "collection_paused": {"type": "boolean"}
       }
     },
     "StreamSnapshot": {
@@ -703,13 +790,20 @@
       "additionalProperties": false,
       "required": [
         "heartbeat_interval_seconds", "buffer_capacity", "reconnect_initial_seconds",
-        "reconnect_max_seconds", "overload_policy"
+        "reconnect_max_seconds", "reconnect_multiplier", "poll_interval_ms", "context_refresh_ms",
+        "device_refresh_seconds", "pipe_name", "pause_event_name", "overload_policy"
       ],
       "properties": {
         "heartbeat_interval_seconds": {"type": "number", "exclusiveMinimum": 0},
         "buffer_capacity": {"type": "integer", "minimum": 1},
         "reconnect_initial_seconds": {"type": "number", "exclusiveMinimum": 0},
         "reconnect_max_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "reconnect_multiplier": {"type": "number", "exclusiveMinimum": 1},
+        "poll_interval_ms": {"type": "integer", "minimum": 1},
+        "context_refresh_ms": {"type": "integer", "minimum": 1},
+        "device_refresh_seconds": {"type": "integer", "minimum": 1},
+        "pipe_name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "pause_event_name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
         "overload_policy": {"type": "string", "enum": ["DROP_OLDEST", "DROP_NEWEST"]}
       }
     },
@@ -857,11 +951,20 @@
     "ApiConfig": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["bind_host", "port", "session_ttl_seconds", "websocket_client_capacity", "replay_event_capacity"],
+      "required": [
+        "bind_host", "port", "session_ttl_seconds", "secret_hash_iterations",
+        "max_sessions", "default_page_size", "max_page_size", "snapshot_alert_limit",
+        "websocket_client_capacity", "replay_event_capacity"
+      ],
       "properties": {
         "bind_host": {"type": "string", "enum": ["127.0.0.1", "::1", "localhost"]},
         "port": {"type": "integer", "minimum": 1024, "maximum": 65535},
         "session_ttl_seconds": {"type": "integer", "minimum": 1},
+        "secret_hash_iterations": {"type": "integer", "minimum": 100000},
+        "max_sessions": {"type": "integer", "minimum": 1},
+        "default_page_size": {"type": "integer", "minimum": 1, "maximum": 200},
+        "max_page_size": {"type": "integer", "minimum": 1, "maximum": 200},
+        "snapshot_alert_limit": {"type": "integer", "minimum": 1, "maximum": 200},
         "websocket_client_capacity": {"type": "integer", "minimum": 1},
         "replay_event_capacity": {"type": "integer", "minimum": 1}
       }
@@ -890,5 +993,3 @@
     }
   }
 }
-
-

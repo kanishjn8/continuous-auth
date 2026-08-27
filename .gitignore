@@ -79,3 +79,7 @@ local-evidence/
 artifacts/
 /models/
 .cache/
+
+PLAN.md
+START_IMPLEMENTATION.md
+TASK_DELEGATION.md
