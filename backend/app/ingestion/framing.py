@@ -65,9 +65,6 @@ class IncrementalFrameDecoder:
                     # cascading misparses of the oversized payload as headers.
                     self.reset()
                     break
-                        )
-                    )
-                    continue
                 self._expected_payload_bytes = declared_size
 
             expected = self._expected_payload_bytes
