@@ -1,0 +1,17 @@
+# T-004/T-005 local development settings. Transport and timing policy is
+# loaded at startup; the hook callback contains no tunable values.
+config_version: t005-windows-development-v1
+protocol_version: 1.0.0
+
+collector:
+  heartbeat_interval_seconds: 1.0
+  buffer_capacity: 4096
+  reconnect_initial_seconds: 0.25
+  reconnect_max_seconds: 5.0
+  reconnect_multiplier: 2.0
+  poll_interval_ms: 25
+  context_refresh_ms: 100
+  device_refresh_seconds: 60
+  pipe_name: continuous-auth-v1
+  pause_event_name: continuous-auth-pause-v1
+  overload_policy: DROP_OLDEST

@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0.0",
+  "type": "KEY_DOWN",
+  "t_capture_us": 1234567890123,
+  "key_class": "ALPHA_L_HOME",
+  "is_repeat": false,
+  "device_class": "EXTERNAL_KEYBOARD",
+  "app_id": 17,
+  "seq": 884213
+}
+
+

@@ -1,0 +1,178 @@
+# T-003 development-only synthetic fixtures. These values are engineering
+# inputs, not participant measurements and never evidence for headline results.
+format_version: 1
+max_frame_bytes: 65536
+
+sampling:
+  minimum_interval_us: 1000
+  minimum_distance_px: 0.1
+  max_attempts: 100
+
+profiles:
+  genuine:
+    keyboard_device: INTERNAL_KEYBOARD
+    mouse_device: TRACKPAD
+    key_class_weights:
+      ALPHA_L_HOME: 4
+      ALPHA_L_UPPER: 2
+      ALPHA_L_LOWER: 1
+      ALPHA_R_HOME: 4
+      ALPHA_R_UPPER: 2
+      ALPHA_R_LOWER: 1
+      DIGIT: 0.5
+      PUNCT: 0.5
+      SPACE: 2
+      BACKSPACE: 0.5
+      DELETE: 0.1
+      ENTER: 0.4
+      MODIFIER: 0.5
+      NAVIGATION: 0.2
+      FUNCTION: 0.1
+      OTHER: 0.1
+    mean_dwell_us: 85000
+    std_dwell_us: 10000
+    mean_key_interval_us: 180000
+    std_key_interval_us: 20000
+    mouse_step_us: 40000
+    mouse_distance_mean_px: 20
+    mouse_distance_std_px: 5
+    mouse_click_probability: 0.03
+    mouse_scroll_probability: 0.02
+    context_categories: [PRODUCTIVITY, DEVELOPMENT, BROWSING]
+
+  impostor:
+    keyboard_device: EXTERNAL_KEYBOARD
+    mouse_device: EXTERNAL_MOUSE
+    key_class_weights:
+      ALPHA_L_HOME: 1
+      ALPHA_L_UPPER: 3
+      ALPHA_L_LOWER: 2
+      ALPHA_R_HOME: 1
+      ALPHA_R_UPPER: 3
+      ALPHA_R_LOWER: 2
+      DIGIT: 1
+      PUNCT: 1
+      SPACE: 1
+      BACKSPACE: 1
+      DELETE: 0.2
+      ENTER: 0.5
+      MODIFIER: 0.8
+      NAVIGATION: 0.5
+      FUNCTION: 0.2
+      OTHER: 0.2
+    mean_dwell_us: 135000
+    std_dwell_us: 12000
+    mean_key_interval_us: 310000
+    std_key_interval_us: 25000
+    mouse_step_us: 65000
+    mouse_distance_mean_px: 38
+    mouse_distance_std_px: 8
+    mouse_click_probability: 0.06
+    mouse_scroll_probability: 0.04
+    context_categories: [BROWSING, PRODUCTIVITY, DEVELOPMENT]
+
+scenarios:
+  baseline:
+    seed: 20260826
+    user_id: synthetic-user
+    session_id: synthetic-session
+    segment_id: synthetic-segment
+    collection_day: "2026-01-01"
+    t_start_us: 1000000
+    duration_us: 10000000
+    app_id: 1
+    profile: genuine
+    takeover_profile: null
+    takeover_fraction: null
+    keyboard_enabled: true
+    mouse_enabled: true
+    context_enabled: true
+    heartbeat_enabled: true
+    context_switch_interval_us: 3000000
+    heartbeat_interval_us: 1000000
+    initial_mouse_x: 960
+    initial_mouse_y: 540
+    score_phases:
+      - name: genuine
+        start_fraction: 0.0
+        end_fraction: 1.0
+        keyboard_risk_score: 0.1
+        mouse_risk_score: 0.1
+        expected_risk_level: LOW
+    faults:
+      gap_event_index: 3
+      duplicate_event_index: 4
+      out_of_order_event_index: 5
+      malformed_payload: "{"
+
+  keyboard_sparse:
+    seed: 20260827
+    user_id: synthetic-user
+    session_id: synthetic-sparse-session
+    segment_id: synthetic-sparse-segment
+    collection_day: "2026-01-02"
+    t_start_us: 1000000
+    duration_us: 5000000
+    app_id: 1
+    profile: genuine
+    takeover_profile: null
+    takeover_fraction: null
+    keyboard_enabled: true
+    mouse_enabled: false
+    context_enabled: true
+    heartbeat_enabled: true
+    context_switch_interval_us: 2000000
+    heartbeat_interval_us: 1000000
+    initial_mouse_x: 960
+    initial_mouse_y: 540
+    score_phases:
+      - name: sparse-genuine
+        start_fraction: 0.0
+        end_fraction: 1.0
+        keyboard_risk_score: 0.1
+        mouse_risk_score: 0.1
+        expected_risk_level: LOW
+    faults:
+      gap_event_index: 2
+      duplicate_event_index: 3
+      out_of_order_event_index: 4
+      malformed_payload: "{"
+
+  takeover:
+    seed: 20260828
+    user_id: synthetic-user
+    session_id: synthetic-takeover-session
+    segment_id: synthetic-takeover-segment
+    collection_day: "2026-01-03"
+    t_start_us: 1000000
+    duration_us: 40000000
+    app_id: 1
+    profile: genuine
+    takeover_profile: impostor
+    takeover_fraction: 0.5
+    keyboard_enabled: true
+    mouse_enabled: true
+    context_enabled: true
+    heartbeat_enabled: true
+    context_switch_interval_us: 3000000
+    heartbeat_interval_us: 1000000
+    initial_mouse_x: 960
+    initial_mouse_y: 540
+    score_phases:
+      - name: genuine
+        start_fraction: 0.0
+        end_fraction: 0.5
+        keyboard_risk_score: 0.1
+        mouse_risk_score: 0.1
+        expected_risk_level: LOW
+      - name: takeover
+        start_fraction: 0.5
+        end_fraction: 1.0
+        keyboard_risk_score: 0.9
+        mouse_risk_score: 0.9
+        expected_risk_level: HIGH
+    faults:
+      gap_event_index: 3
+      duplicate_event_index: 4
+      out_of_order_event_index: 5
+      malformed_payload: "{"

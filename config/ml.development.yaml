@@ -1,0 +1,88 @@
+# ML-pipeline tunables for T-008/T-010/T-011.
+#
+# Repository rule: every tunable value lives under the root `config/`
+# directory. This development-only file keeps the ML pipeline's engineering
+# placeholders separate from the runtime configuration in `development.yaml`.
+#
+# ADR-005 explicitly marks window quality-gate thresholds `[OPEN]`:
+# "Exact thresholds (min_keystrokes, min_mouse_samples) to be set in Phase 2
+# from observed distributions." The values below are engineering
+# placeholders, not empirical results. They are NOT a resolution of the open
+# decision -- see PLAN.md Section 21 / Section 5.3 note on min_windows.
+
+windowing:
+  # PLAN.md Section 7.3: windows close on whichever comes first.
+  window_seconds: 30.0
+  window_keystrokes: 100
+
+feature_computation:
+  # Gap beyond which an inter-key interval counts as a "pause" (iki-based
+  # pause_ratio feature). Placeholder, not empirically derived.
+  pause_threshold_us: 2000000 # 2s
+  # Gap below which consecutive keystrokes count as part of a typing burst.
+  burst_gap_threshold_us: 400000 # 0.4s
+  # Mouse: gap beyond which movement is treated as a new segment.
+  mouse_segment_gap_us: 500000 # 0.5s
+  # Mouse: gap within a segment beyond which we count a "micro-pause".
+  mouse_micro_pause_us: 150000 # 0.15s
+  # Mouse: max gap between clicks to count as a double-click pair.
+  double_click_max_gap_us: 500000 # 0.5s
+  # Mouse: max gap between scroll events to count as one scroll burst.
+  scroll_burst_gap_us: 300000 # 0.3s
+  # ADR-009: mouse spatial features are resolution-normalised. The IPC
+  # schema in PLAN.md Section 7.2 does not carry per-event resolution/DPI
+  # (that is expected to arrive via device/context metadata once T-005
+  # lands). Placeholder reference resolution used when the caller does not
+  # supply the device's actual resolution.
+  reference_screen_width_px: 1920
+  reference_screen_height_px: 1080
+
+quality_gate:
+  # ADR-005 [OPEN] -- placeholders pending Phase 2 empirical distribution
+  # analysis (PLAN.md Section 2.10).
+  min_keystrokes: 5
+  min_mouse_samples: 10
+
+per_user_normalization:
+  # Minimum number of enrollment windows before per-user baseline stats are
+  # considered stable enough to normalize against (used by ml/training).
+  min_baseline_windows: 20
+
+isolation_forest:
+  n_estimators: 100
+  contamination: "auto"
+  max_samples: "auto"
+  random_state: 42
+
+# PLAN.md Section 10.4 required baseline comparisons.
+mahalanobis_baseline:
+  # Ridge added to the covariance diagonal before inversion, for numerical
+  # stability when per-user sample size is close to the feature dimension.
+  # Features reach this baseline already standardized (per-feature
+  # variance ~1, see PreprocessingParams), so the ridge must be on that
+  # same order to matter: per_user_normalization.min_baseline_windows (20)
+  # is smaller than both feature blocks' dimensionality (24 keyboard, 22
+  # mouse), so a user trained at the minimum admitted window count has a
+  # rank-deficient empirical covariance with several exactly-zero
+  # eigenvalues. A ridge many orders of magnitude below the ~1 feature
+  # scale (e.g. 1e-6) leaves those null directions dominating the inverse
+  # (pinv turns a ~0 eigenvalue + 1e-6 into a ~1e6 contribution), so the
+  # Mahalanobis distance becomes numerical noise rather than signal
+  # exactly at the admission boundary.
+  ridge: 0.1
+
+one_class_svm_baseline:
+  kernel: "rbf"
+  nu: 0.1
+  gamma: "scale"
+
+calibration:
+  # Percentile calibration (PLAN.md Section 10.6) - no free parameters
+  # beyond the enrollment distribution itself, kept here for symmetry /
+  # future tuning (e.g. smoothing bandwidth).
+  method: "empirical_percentile"
+
+enrollment_experiment:
+  # PLAN.md Section 10.5 enrollment-length experiment day counts.
+  day_lengths: [1, 2, 3, 5, 7]
+

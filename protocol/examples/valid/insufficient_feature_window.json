@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "user_id": "synthetic-user-1",
+  "session_id": "synthetic-session-1",
+  "segment_id": "synthetic-segment-1",
+  "window_id": "synthetic-window-1",
+  "t_start_us": 1000000,
+  "t_end_us": 31000000,
+  "quality_label": "INSUFFICIENT_DATA",
+  "key_event_count": 0,
+  "mouse_event_count": 0,
+  "collection_day": "2026-08-25",
+  "provenance": "SYNTHETIC",
+  "keyboard_features": null,
+  "mouse_features": null,
+  "context": {
+    "dominant_category": "UNKNOWN",
+    "category_fractions": {"UNKNOWN": 1.0},
+    "app_switch_rate": 0.0,
+    "device_class": "UNKNOWN"
+  }
+}
+
+

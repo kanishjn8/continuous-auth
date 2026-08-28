@@ -1,0 +1,10 @@
+config_version: orchestration-development-v1
+protocol_version: 1.0.0
+development_only: true
+
+orchestration:
+  pipe_read_bytes: 65536
+  pipe_buffer_bytes: 262144
+  heartbeat_timeout_seconds: 5.0
+  watchdog_interval_seconds: 1.0
+  measurement_capacity: 4096

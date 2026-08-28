@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "continuous-authentication-workspace"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "joblib>=1.4,<2",
+  "jsonschema>=4.23,<5",
+  "numpy>=1.26,<2.4",
+  "pydantic>=2.10,<3",
+  "PyYAML>=6,<7",
+  "scikit-learn>=1.5,<2",
+]
+
+[project.optional-dependencies]
+backend = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+]
+dev = [
+  "black>=24.10,<26",
+  "hypothesis>=6.100,<7",
+  "mypy>=1.13,<2",
+  "pytest>=8.3,<10",
+  "ruff>=0.8,<1",
+  "types-PyYAML>=6,<7",
+]
+
+[tool.setuptools.packages.find]
+include = ["backend*", "ml*", "protocol*", "tools*"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+testpaths = [
+  "backend/tests",
+  "ml/tests",
+  "protocol/tests",
+  "tools/guardrails/tests",
+  "tools/benchmarks/tests",
+  "tools/collection/tests",
+  "tools/evaluation/tests",
+  "tools/faultinjection/tests",
+  "tools/synthetic/tests",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = ["protocol/generated"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.black]
+target-version = ["py311"]
+line-length = 100
+extend-exclude = "protocol/generated"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+exclude = ["protocol/generated", "ml/tests", "tools/synthetic/tests"]
+
+[[tool.mypy.overrides]]
+module = ["joblib", "sklearn.*"]
+ignore_missing_imports = true

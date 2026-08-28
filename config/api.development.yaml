@@ -1,0 +1,17 @@
+# Local-only T-016 development transport settings. Authentication secrets are
+# supplied at process start and are never stored in this file or source control.
+config_version: t016-local-development-v1
+protocol_version: 1.0.0
+development_only: true
+
+api:
+  bind_host: 127.0.0.1
+  port: 8765
+  session_ttl_seconds: 1800
+  secret_hash_iterations: 200000
+  max_sessions: 8
+  default_page_size: 50
+  max_page_size: 200
+  snapshot_alert_limit: 20
+  websocket_client_capacity: 128
+  replay_event_capacity: 1024

@@ -1,0 +1,8 @@
+config_version: final-evaluation-development-v1
+protocol_version: 1.0.0
+development_only: true
+
+statistics:
+  bootstrap_resamples: 2000
+  bootstrap_confidence: 0.95
+  random_seed: 42

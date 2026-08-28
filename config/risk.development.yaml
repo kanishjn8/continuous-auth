@@ -1,0 +1,22 @@
+# T-013 synthetic/local development policy only. The numeric O3/O7/O8/O9
+# questions remain OPEN and require Phase 4/5 evidence plus human approval.
+# These values exercise code paths; they are not approved production policy.
+config_version: t013-synthetic-development-v1
+protocol_version: 1.0.0
+development_only: true
+
+enrollment:
+  min_windows: 20
+  min_distinct_days: 3
+  calibration_windows: 10
+
+risk:
+  keyboard_weight: 0.5
+  mouse_weight: 0.5
+  ewma_alpha: 0.4
+  medium_threshold: 0.45
+  high_threshold: 0.75
+  breach_k: 3
+  breach_n: 5
+  cooldown_seconds: 60
+  action_budget: 2

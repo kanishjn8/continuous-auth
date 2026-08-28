@@ -1,0 +1,422 @@
+"""Authenticated C7 routes with safe errors, correlation IDs, and bounded pagination."""
+
+# FastAPI dependency injection intentionally evaluates Depends objects in signatures.
+# ruff: noqa: B008
+
+from __future__ import annotations
+
+import secrets
+from dataclasses import dataclass
+from datetime import timedelta
+
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
+from starlette.middleware.base import RequestResponseEndpoint
+
+from backend.app.storage.errors import StorageError
+from backend.app.websocket.broker import EventBroker, SlowClient
+from protocol.generated.python.contracts import (
+    AdminActionResponse,
+    AlertPage,
+    AlertType,
+    ApiError,
+    AuthLoginRequest,
+    AuthSession,
+    CurrentState,
+    DecisionPage,
+    Health,
+    Metrics,
+    PageMetadata,
+    Profile,
+    ProfileCreate,
+    ProfilePage,
+    StreamSnapshot,
+    UpdateCandidatePage,
+)
+
+from .auth import LocalSessionAuth, SessionIdentity
+from .backend import ApiBackendError, ResourceConflict, ResourceNotFound, SQLiteApiBackend
+from .config import ApiSettings
+from .cursors import CursorCodec, InvalidCursor
+
+COOKIE_NAME = "ca_session"
+
+
+@dataclass(frozen=True)
+class ApiContext:
+    settings: ApiSettings
+    backend: SQLiteApiBackend
+    auth: LocalSessionAuth
+    cursors: CursorCodec
+    broker: EventBroker
+
+
+class _ShadowModeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool
+
+
+def _correlation(request: Request) -> str:
+    return str(request.state.correlation_id)
+
+
+def _safe_error(request: Request, status: int, code: str, message: str) -> JSONResponse:
+    body = ApiError(code=code, message=message, correlation_id=_correlation(request))
+    return JSONResponse(status_code=status, content=body.model_dump(mode="json"))
+
+
+def _next_page(
+    context: ApiContext,
+    *,
+    resource: str,
+    scope: str,
+    offset: int,
+    limit: int,
+    has_more: bool,
+) -> PageMetadata:
+    return PageMetadata(
+        next_cursor=(
+            context.cursors.encode(resource=resource, offset=offset + limit, scope=scope)
+            if has_more
+            else None
+        ),
+        has_more=has_more,
+    )
+
+
+def _page_limit(context: ApiContext, requested: int | None) -> int:
+    resolved = context.settings.api.default_page_size if requested is None else requested
+    if resolved > context.settings.api.max_page_size:
+        raise InvalidCursor("requested page is too large")
+    return resolved
+
+
+def create_api_app(
+    *,
+    settings: ApiSettings,
+    backend: SQLiteApiBackend,
+    local_secret: str,
+) -> FastAPI:
+    auth = LocalSessionAuth(
+        local_secret,
+        ttl=timedelta(seconds=settings.api.session_ttl_seconds),
+        hash_iterations=settings.api.secret_hash_iterations,
+        max_sessions=settings.api.max_sessions,
+    )
+    cursors = CursorCodec(secrets.token_bytes(32))
+
+    def snapshot() -> StreamSnapshot:
+        alerts = backend.list_alerts(
+            offset=0,
+            limit=settings.api.snapshot_alert_limit,
+            alert_type=None,
+        )
+        return StreamSnapshot(
+            current_state=backend.current_state(),
+            recent_alerts=list(alerts.items),
+            health=backend.health(),
+            last_stream_seq=0,
+        )
+
+    broker = EventBroker(
+        replay_capacity=settings.api.replay_event_capacity,
+        client_capacity=settings.api.websocket_client_capacity,
+        snapshot_provider=snapshot,
+    )
+    context = ApiContext(settings, backend, auth, cursors, broker)
+    app = FastAPI(
+        title="Continuous Authentication Backend",
+        version=settings.protocol_version,
+        docs_url=None,
+        redoc_url=None,
+    )
+    app.state.api_context = context
+
+    @app.middleware("http")
+    async def correlation_middleware(
+        request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        supplied = request.headers.get("X-Correlation-ID")
+        request.state.correlation_id = (
+            supplied if supplied and len(supplied) <= 128 else secrets.token_hex(16)
+        )
+        response = await call_next(request)
+        response.headers["X-Correlation-ID"] = request.state.correlation_id
+        return response
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+        del exc
+        return _safe_error(request, 422, "INVALID_REQUEST", "request validation failed")
+
+    @app.exception_handler(InvalidCursor)
+    async def invalid_cursor(request: Request, exc: InvalidCursor) -> JSONResponse:
+        del exc
+        return _safe_error(request, 400, "INVALID_CURSOR", "pagination cursor is invalid")
+
+    @app.exception_handler(ResourceNotFound)
+    async def not_found(request: Request, exc: ResourceNotFound) -> JSONResponse:
+        return _safe_error(request, 404, exc.code, str(exc))
+
+    @app.exception_handler(ResourceConflict)
+    async def conflict(request: Request, exc: ResourceConflict) -> JSONResponse:
+        return _safe_error(request, 409, exc.code, str(exc))
+
+    @app.exception_handler(ApiBackendError)
+    async def backend_error(request: Request, exc: ApiBackendError) -> JSONResponse:
+        del exc
+        return _safe_error(request, 500, "BACKEND_ERROR", "backend operation failed")
+
+    @app.exception_handler(StorageError)
+    async def storage_error(request: Request, exc: StorageError) -> JSONResponse:
+        del exc
+        return _safe_error(request, 503, "STORAGE_UNAVAILABLE", "local storage is unavailable")
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+        del exc
+        return _safe_error(request, 500, "INTERNAL_ERROR", "internal operation failed")
+
+    def require_session(ca_session: str | None = Cookie(default=None)) -> SessionIdentity:
+        identity = auth.authenticate(ca_session)
+        if identity is None:
+            raise HTTPException(status_code=401, detail="authentication required")
+        return identity
+
+    @app.exception_handler(401)
+    async def unauthorized(request: Request, exc: object) -> JSONResponse:
+        del exc
+        return _safe_error(request, 401, "AUTHENTICATION_REQUIRED", "authentication required")
+
+    @app.post("/v1/auth/login", response_model=AuthSession)
+    def login(body: AuthLoginRequest, request: Request, response: Response) -> AuthSession:
+        created = auth.create(body.local_secret)
+        if created is None:
+            raise HTTPException(status_code=401, detail="authentication failed")
+        token, expires = created
+        response.set_cookie(
+            COOKIE_NAME,
+            token,
+            max_age=settings.api.session_ttl_seconds,
+            httponly=True,
+            samesite="strict",
+            secure=False,
+        )
+        return AuthSession(
+            authenticated=True,
+            expires_at=expires.isoformat().replace("+00:00", "Z"),
+            correlation_id=_correlation(request),
+        )
+
+    @app.get("/v1/auth/session", response_model=AuthSession)
+    def session(
+        request: Request, identity: SessionIdentity = Depends(require_session)
+    ) -> AuthSession:
+        return AuthSession(
+            authenticated=True,
+            expires_at=identity.expires_at.isoformat().replace("+00:00", "Z"),
+            correlation_id=_correlation(request),
+        )
+
+    @app.post("/v1/auth/logout", response_model=AuthSession)
+    def logout(
+        request: Request,
+        response: Response,
+        ca_session: str | None = Cookie(default=None),
+        identity: SessionIdentity = Depends(require_session),
+    ) -> AuthSession:
+        del identity
+        auth.revoke(ca_session)
+        response.delete_cookie(COOKIE_NAME)
+        return AuthSession(
+            authenticated=False, expires_at=None, correlation_id=_correlation(request)
+        )
+
+    @app.get("/v1/state", response_model=CurrentState)
+    def state(identity: SessionIdentity = Depends(require_session)) -> CurrentState:
+        del identity
+        return backend.current_state()
+
+    @app.get("/v1/profiles", response_model=ProfilePage)
+    def profiles(
+        cursor: str | None = None,
+        limit: int | None = Query(default=None, ge=1),
+        identity: SessionIdentity = Depends(require_session),
+    ) -> ProfilePage:
+        del identity
+        resolved_limit = _page_limit(context, limit)
+        offset = cursors.decode(cursor, resource="profiles")
+        result = backend.list_profiles(offset=offset, limit=resolved_limit)
+        return ProfilePage(
+            items=list(result.items),
+            page=_next_page(
+                context,
+                resource="profiles",
+                scope="",
+                offset=offset,
+                limit=resolved_limit,
+                has_more=result.has_more,
+            ),
+        )
+
+    @app.post("/v1/profiles", response_model=Profile, status_code=201)
+    def create_profile(
+        body: ProfileCreate,
+        identity: SessionIdentity = Depends(require_session),
+    ) -> Profile:
+        del identity
+        return backend.create_profile(body.user_id)
+
+    @app.get("/v1/profiles/{user_id}", response_model=Profile)
+    def profile(user_id: str, identity: SessionIdentity = Depends(require_session)) -> Profile:
+        del identity
+        return backend.get_profile(user_id)
+
+    @app.get("/v1/history/decisions", response_model=DecisionPage)
+    def decisions(
+        cursor: str | None = None,
+        limit: int | None = Query(default=None, ge=1),
+        user_id: str | None = None,
+        identity: SessionIdentity = Depends(require_session),
+    ) -> DecisionPage:
+        del identity
+        resolved_limit = _page_limit(context, limit)
+        scope = user_id or ""
+        offset = cursors.decode(cursor, resource="decisions", scope=scope)
+        result = backend.list_decisions(offset=offset, limit=resolved_limit, user_id=user_id)
+        return DecisionPage(
+            items=list(result.items),
+            page=_next_page(
+                context,
+                resource="decisions",
+                scope=scope,
+                offset=offset,
+                limit=resolved_limit,
+                has_more=result.has_more,
+            ),
+        )
+
+    @app.get("/v1/alerts", response_model=AlertPage)
+    def alerts(
+        cursor: str | None = None,
+        limit: int | None = Query(default=None, ge=1),
+        alert_type: AlertType | None = None,
+        identity: SessionIdentity = Depends(require_session),
+    ) -> AlertPage:
+        del identity
+        resolved_limit = _page_limit(context, limit)
+        scope = alert_type.value if alert_type else ""
+        offset = cursors.decode(cursor, resource="alerts", scope=scope)
+        result = backend.list_alerts(offset=offset, limit=resolved_limit, alert_type=alert_type)
+        return AlertPage(
+            items=list(result.items),
+            page=_next_page(
+                context,
+                resource="alerts",
+                scope=scope,
+                offset=offset,
+                limit=resolved_limit,
+                has_more=result.has_more,
+            ),
+        )
+
+    @app.post("/v1/alerts/{alert_id}/acknowledge", response_model=AdminActionResponse)
+    def acknowledge(
+        alert_id: str,
+        request: Request,
+        identity: SessionIdentity = Depends(require_session),
+    ) -> AdminActionResponse:
+        del identity
+        backend.acknowledge_alert(alert_id)
+        return AdminActionResponse(
+            accepted=True, code="ALERT_ACKNOWLEDGED", correlation_id=_correlation(request)
+        )
+
+    @app.get("/v1/updates", response_model=UpdateCandidatePage)
+    def updates(
+        cursor: str | None = None,
+        limit: int | None = Query(default=None, ge=1),
+        user_id: str | None = None,
+        identity: SessionIdentity = Depends(require_session),
+    ) -> UpdateCandidatePage:
+        del identity
+        resolved_limit = _page_limit(context, limit)
+        scope = user_id or ""
+        offset = cursors.decode(cursor, resource="updates", scope=scope)
+        result = backend.list_updates(offset=offset, limit=resolved_limit, user_id=user_id)
+        return UpdateCandidatePage(
+            items=list(result.items),
+            page=_next_page(
+                context,
+                resource="updates",
+                scope=scope,
+                offset=offset,
+                limit=resolved_limit,
+                has_more=result.has_more,
+            ),
+        )
+
+    @app.get("/v1/metrics", response_model=Metrics)
+    def metrics(identity: SessionIdentity = Depends(require_session)) -> Metrics:
+        del identity
+        return backend.metrics()
+
+    @app.get("/v1/health", response_model=Health)
+    def health(identity: SessionIdentity = Depends(require_session)) -> Health:
+        del identity
+        return backend.health()
+
+    @app.put("/v1/admin/shadow-mode")
+    def shadow_mode(
+        body: _ShadowModeRequest,
+        request: Request,
+        identity: SessionIdentity = Depends(require_session),
+    ) -> dict[str, object]:
+        del identity
+        backend.set_shadow_mode(body.enabled)
+        return {"enabled": body.enabled, "correlation_id": _correlation(request)}
+
+    @app.post("/v1/admin/models/{user_id}/rollback", response_model=AdminActionResponse)
+    def rollback(
+        user_id: str,
+        request: Request,
+        identity: SessionIdentity = Depends(require_session),
+    ) -> AdminActionResponse:
+        del identity
+        backend.rollback(user_id)
+        return AdminActionResponse(
+            accepted=True, code="MODEL_PROFILE_ROLLED_BACK", correlation_id=_correlation(request)
+        )
+
+    @app.get("/healthz", include_in_schema=False)
+    def healthz() -> dict[str, str]:
+        return {"status": "alive", "protocol_version": settings.protocol_version}
+
+    from fastapi import WebSocket, WebSocketDisconnect
+
+    @app.websocket("/v1/stream")
+    async def stream(websocket: WebSocket, cursor: int | None = None) -> None:
+        token = websocket.cookies.get(COOKIE_NAME)
+        if auth.authenticate(token) is None:
+            await websocket.close(code=4401)
+            return
+        subscription = await broker.subscribe(cursor)
+        await websocket.accept()
+        try:
+            for envelope in subscription.initial:
+                await websocket.send_json(envelope.model_dump(mode="json"))
+            while True:
+                item = await subscription.queue.get()
+                if isinstance(item, SlowClient):
+                    await websocket.close(code=4408)
+                    return
+                await websocket.send_json(item.model_dump(mode="json"))
+        except WebSocketDisconnect:
+            return
+        finally:
+            await broker.unsubscribe(subscription.client_id)
+
+    return app

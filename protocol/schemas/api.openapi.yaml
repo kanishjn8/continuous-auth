@@ -1,0 +1,336 @@
+openapi: 3.1.0
+info:
+  title: Continuous Authentication Local API
+  version: 1.0.0
+  description: >-
+    Authenticated local-only C7 API. Raw feature vectors are intentionally absent
+    from this surface. All failures use a stable safe envelope with a correlation ID.
+servers:
+  - url: http://127.0.0.1:8765
+    description: Local monitored endpoint only
+security:
+  - localSession: []
+paths:
+  /v1/auth/login:
+    post:
+      operationId: loginLocalSession
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLoginRequest"
+      responses:
+        "200":
+          description: Short-lived local dashboard session established
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/auth/session:
+    get:
+      operationId: getLocalSession
+      responses:
+        "200":
+          description: Current local dashboard session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/auth/logout:
+    post:
+      operationId: logoutLocalSession
+      responses:
+        "200":
+          description: Local dashboard session revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/state:
+    get:
+      operationId: getCurrentState
+      responses:
+        "200":
+          description: Current authenticated profile and protection state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentState"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/profiles:
+    get:
+      operationId: listProfiles
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Enrolled profiles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfilePage"
+        default:
+          $ref: "#/components/responses/ApiError"
+    post:
+      operationId: createProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileCreate"
+      responses:
+        "201":
+          description: Profile enrollment started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/profiles/{user_id}:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    get:
+      operationId: getProfile
+      responses:
+        "200":
+          description: Profile status and enrollment progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/history/decisions:
+    get:
+      operationId: listDecisions
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Replay-auditable decision history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DecisionPage"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/alerts:
+    get:
+      operationId: listAlerts
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: alert_type
+          in: query
+          schema:
+            $ref: "#/components/schemas/AlertType"
+      responses:
+        "200":
+          description: Behavioral, availability, and tamper alerts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertPage"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/alerts/{alert_id}/acknowledge:
+    parameters:
+      - name: alert_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    post:
+      operationId: acknowledgeAlert
+      responses:
+        "200":
+          description: Alert acknowledgement recorded and audited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminActionResponse"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/updates:
+    get:
+      operationId: listUpdateCandidates
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Quarantined, eligible, promoted, and rejected candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateCandidatePage"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/metrics:
+    get:
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Bounded runtime and latency metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Metrics"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/health:
+    get:
+      operationId: getHealth
+      responses:
+        "200":
+          description: Component availability and collector heartbeat state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/admin/shadow-mode:
+    put:
+      operationId: setShadowMode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: Administrative mode updated and audited
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [enabled, correlation_id]
+                properties:
+                  enabled:
+                    type: boolean
+                  correlation_id:
+                    type: string
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/admin/models/{user_id}/rollback:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      operationId: rollbackActiveProfile
+      responses:
+        "200":
+          description: Previous retained profile activated atomically
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminActionResponse"
+        default:
+          $ref: "#/components/responses/ApiError"
+components:
+  securitySchemes:
+    localSession:
+      type: apiKey
+      in: cookie
+      name: ca_session
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    UserId:
+      name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  responses:
+    ApiError:
+      description: Safe error response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+  schemas:
+    UserState:
+      $ref: "contracts.schema.json#/$defs/UserState"
+    RiskLevel:
+      $ref: "contracts.schema.json#/$defs/RiskLevel"
+    AlertType:
+      $ref: "contracts.schema.json#/$defs/AlertType"
+    CurrentState:
+      $ref: "contracts.schema.json#/$defs/CurrentState"
+    ProfileCreate:
+      $ref: "contracts.schema.json#/$defs/ProfileCreate"
+    Profile:
+      $ref: "contracts.schema.json#/$defs/Profile"
+    PageMetadata:
+      $ref: "contracts.schema.json#/$defs/PageMetadata"
+    ProfilePage:
+      $ref: "contracts.schema.json#/$defs/ProfilePage"
+    DecisionPage:
+      $ref: "contracts.schema.json#/$defs/DecisionPage"
+    Alert:
+      $ref: "contracts.schema.json#/$defs/Alert"
+    AlertPage:
+      $ref: "contracts.schema.json#/$defs/AlertPage"
+    Metrics:
+      $ref: "contracts.schema.json#/$defs/Metrics"
+    Health:
+      $ref: "contracts.schema.json#/$defs/Health"
+    ApiError:
+      $ref: "contracts.schema.json#/$defs/ApiError"
+    AuthLoginRequest:
+      $ref: "contracts.schema.json#/$defs/AuthLoginRequest"
+    AuthSession:
+      $ref: "contracts.schema.json#/$defs/AuthSession"
+    UpdateCandidatePage:
+      $ref: "contracts.schema.json#/$defs/UpdateCandidatePage"
+    AdminActionResponse:
+      $ref: "contracts.schema.json#/$defs/AdminActionResponse"
+

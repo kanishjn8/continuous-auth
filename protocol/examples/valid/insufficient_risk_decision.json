@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "decision_id": "synthetic-decision-1",
+  "user_id": "synthetic-user-1",
+  "session_id": "synthetic-session-1",
+  "segment_id": "synthetic-segment-1",
+  "window_id": "synthetic-window-1",
+  "t_decision_us": 31001000,
+  "quality_label": "INSUFFICIENT_DATA",
+  "fused_score": null,
+  "context_confidence": 1.0,
+  "confidence_source": "NEUTRAL_FALLBACK",
+  "smoothed_score": null,
+  "risk_level": "UNAVAILABLE",
+  "user_state": "ACTIVE",
+  "action": "NONE",
+  "reason_code": "INSUFFICIENT_EVIDENCE_HOLD",
+  "threshold_config_version": "unresolved-o8-o9",
+  "config_checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "shadow_mode": false,
+  "enforcement_applied": false
+}
+
+

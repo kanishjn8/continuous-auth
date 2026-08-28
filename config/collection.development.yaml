@@ -1,0 +1,18 @@
+config_version: collection-development-unreviewed-v1
+protocol_version: 1.0.0
+
+# Engineering placeholders. Human reviewers must replace these from the approved
+# pilot protocol before participant collection; they are not performance claims.
+collection:
+  target_collection_days: 7
+  min_windows_per_day: 50
+  min_full_modality_fraction: 0.40
+  max_observed_gap_hours: 24.0
+  scheduled_anchor_interval_hours: 24.0
+  eligible_provenance: [TEAM, PILOT]
+
+freeze:
+  min_distinct_days: 3
+  training_fraction: 0.60
+  validation_fraction: 0.20
+  evaluation_fraction: 0.20
