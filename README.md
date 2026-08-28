@@ -42,6 +42,8 @@ npm run build
 See `docs/architecture.md` for component/privacy boundaries,
 `docs/deployment/windows.md` for packaging, `docs/pilot/` for collection operations,
 `docs/update-manager.md` for G1–G6, and `docs/evaluation.md` for evidence rules.
+See `startup.md` for Docker control-plane startup and the complete ordered Windows
+startup procedure, including the native event collector.
 
 ## Evidence still requiring humans
 
@@ -50,4 +52,3 @@ hook/timing evidence, security approval for OS enforcement actions, informed mim
 live takeover, clean-machine/soak evidence, or academic review. Development thresholds
 are explicitly unreviewed and no accuracy is claimed. Participant data, databases,
 credentials, logs, evidence, and sensitive model artifacts remain ignored by Git.
-
