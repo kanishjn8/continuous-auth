@@ -1,4 +1,4 @@
-_e# Repository Instructions
+# Repository Instructions
 
 This repository implements the architecture and privacy boundaries in `PLAN.md`.
 `protocol/` is the only source of shared contracts, `ml/features/` is the only
