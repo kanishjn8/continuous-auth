@@ -60,6 +60,13 @@ class IncrementalFrameDecoder:
                             f"declared {declared_size} bytes exceeds {self._max_frame_bytes}",
                         )
                     )
+                    # Cannot safely resynchronize within a length-prefixed stream once a
+                    # frame exceeds the configured bound; discard buffered state to avoid
+                    # cascading misparses of the oversized payload as headers.
+                    self.reset()
+                    break
+                        )
+                    )
                     continue
                 self._expected_payload_bytes = declared_size
 
