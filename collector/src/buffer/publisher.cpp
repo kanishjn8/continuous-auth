@@ -32,10 +32,19 @@ std::uint64_t EventPublisher::capture_time_us() noexcept {
 }
 
 std::int64_t EventPublisher::next_sequence() noexcept {
-  const auto value = sequence_.fetch_add(1, std::memory_order_relaxed);
-  if (value == (std::numeric_limits<std::int64_t>::max)()) {
-    clock_failed_.store(true, std::memory_order_relaxed);
+  auto value = sequence_.load(std::memory_order_relaxed);
+  while (true) {
+    if (value == (std::numeric_limits<std::int64_t>::max)()) {
+      clock_failed_.store(true, std::memory_order_relaxed);
+      return value;
+    }
+    const auto next = value + 1;
+    if (sequence_.compare_exchange_weak(value, next, std::memory_order_relaxed,
+                                       std::memory_order_relaxed)) {
+      return value;
+    }
   }
+}
   return value;
 }
 
