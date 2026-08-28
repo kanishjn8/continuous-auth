@@ -22,6 +22,7 @@ from backend.app.storage.errors import (
 from backend.app.storage.service import AvailabilityEvent, StorageService
 from protocol.generated.python.contracts import (
     Alert,
+    AlertType,
     ApplicationCategory,
     AppRegistryEntry,
     FeatureWindow,
@@ -477,7 +478,7 @@ def test_retention_deletes_bounded_rows_and_reports_counts(
     service.store_alert(
         Alert(
             alert_id="retention-alert",
-            alert_type="AVAILABILITY",
+            alert_type=AlertType.AVAILABILITY,
             severity="HIGH",
             code="SYNTHETIC_RETENTION",
             occurred_at="2026-01-01T00:00:00Z",

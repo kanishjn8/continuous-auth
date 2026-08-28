@@ -95,11 +95,14 @@ def test_each_fundamental_gate_can_reject_and_low_risk_is_not_an_anchor() -> Non
         _evidence(unexplained_gap=True),
     )
     for index, evidence in enumerate(cases):
+        def candidate_id_factory(index: int = index) -> str:
+            return f"candidate-{index}"
+
         repository = MemoryUpdateRepository()
         manager = UpdateManager(
             load_update_settings(),
             repository,
-            candidate_id_factory=lambda index=index: f"candidate-{index}",
+            candidate_id_factory=candidate_id_factory,
         )
         candidate = manager.submit_segment(evidence)
         assert candidate.disposition is CandidateDisposition.REJECTED

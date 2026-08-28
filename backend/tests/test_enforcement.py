@@ -7,6 +7,7 @@ from backend.app.decisions import (
     ActionStatus,
     CallbackActionAdapter,
     EnforcementCoordinator,
+    EnforcementNotice,
     VerificationRecord,
 )
 from backend.app.decisions.adapters import AdapterResult
@@ -91,7 +92,7 @@ def test_non_active_and_adapter_failure_are_fail_open() -> None:
         calls += 1
         raise RuntimeError("synthetic adapter failure")
 
-    notices = []
+    notices: list[EnforcementNotice] = []
     coordinator = EnforcementCoordinator(
         {DecisionAction.REAUTH: CallbackActionAdapter(DecisionAction.REAUTH, callback)},
         notice_sink=notices.append,
