@@ -152,3 +152,48 @@ def test_freeze_minimum_three_days_keeps_all_partitions_non_empty(tmp_path: Path
         "TRAIN": 1,
         "VALIDATION": 1,
     }
+
+
+def test_pilot_collection_profile_matches_the_planned_round() -> None:
+    from pathlib import Path
+
+    from protocol.generated.python.contracts import DataProvenance
+    from tools.collection.config import load_collection_settings
+
+    root = Path(__file__).resolve().parents[3]
+    settings = load_collection_settings(root / "config/collection.pilot.yaml")
+    assert settings.target_collection_days == 5
+    assert settings.eligible_provenance == frozenset({DataProvenance.PILOT})
+    assert settings.min_distinct_days >= 3
+    assert settings.scheduled_anchor_interval_hours == 4.0
+
+
+def test_five_days_partition_into_three_non_empty_splits() -> None:
+    """A 5-day round must still yield day-disjoint TRAIN/VALIDATION/EVALUATION."""
+
+    from pathlib import Path
+
+    from tools.collection.config import load_collection_settings
+    from tools.collection.freeze import _partition_days
+
+    root = Path(__file__).resolve().parents[3]
+    settings = load_collection_settings(root / "config/collection.pilot.yaml")
+    days = ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05"]
+    assignments = _partition_days(days, settings)
+    assert set(assignments.values()) == {"TRAIN", "VALIDATION", "EVALUATION"}
+
+
+def test_development_collection_profile_is_unchanged() -> None:
+    """Requirement: existing development configuration is not modified."""
+
+    from pathlib import Path
+
+    from protocol.generated.python.contracts import DataProvenance
+    from tools.collection.config import load_collection_settings
+
+    root = Path(__file__).resolve().parents[3]
+    settings = load_collection_settings(root / "config/collection.development.yaml")
+    assert settings.target_collection_days == 7
+    assert settings.eligible_provenance == frozenset(
+        {DataProvenance.TEAM, DataProvenance.PILOT}
+    )

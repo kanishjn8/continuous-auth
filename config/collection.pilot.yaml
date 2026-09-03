@@ -1,0 +1,35 @@
+# Collection targets for the current pilot round.
+#
+# `collection.development.yaml` is deliberately left untouched and still
+# describes the 7-day team/development round. This file describes the planned
+# 5-day participant round and nothing else.
+#
+# These remain engineering placeholders, not approved pilot-protocol values.
+# Human reviewers must confirm them against the approved protocol before
+# participant collection begins; `config_version` says so.
+config_version: collection-pilot-unreviewed-v1
+protocol_version: 1.0.0
+
+collection:
+  # The planned round is 5 days. Leaving this at 7 would make
+  # COLLECTION_DAYS_BELOW_TARGET fire for every participant on every health
+  # report, which would train the operator to ignore the shortfall signal.
+  target_collection_days: 5
+  min_windows_per_day: 50
+  min_full_modality_fraction: 0.40
+  max_observed_gap_hours: 24.0
+  # A3 cadence. Must equal update_manager.scheduled_anchor_interval_seconds
+  # in config/updates.development.yaml (14400s); a test asserts this.
+  scheduled_anchor_interval_hours: 4.0
+  # This round collects from pilot participants only. The development profile
+  # keeps [TEAM, PILOT]. Synthetic and public are structurally forbidden here
+  # by _CollectionValues.participant_provenance_only.
+  eligible_provenance: [PILOT]
+
+freeze:
+  # Five days partitions to a valid day-disjoint 2/2/1 split under
+  # freeze._partition_days, which reserves one whole day per partition first.
+  min_distinct_days: 3
+  training_fraction: 0.60
+  validation_fraction: 0.20
+  evaluation_fraction: 0.20
