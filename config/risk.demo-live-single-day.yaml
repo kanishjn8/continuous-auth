@@ -1,0 +1,30 @@
+# DEMO-ONLY override, NOT used by tests or the default runtime path.
+#
+# Identical to config/risk.development.yaml except min_distinct_days is
+# lowered from 3 to 1, purely so a single-evening live demo session can
+# exit ENROLLING and show a real decision/protection state. This does NOT
+# change evaluation methodology anywhere else in the repo -- the day-disjoint
+# splitting rule in ml/evaluation/splitting.py and the offline synthetic
+# evaluation results are untouched and still use proper multi-day rigor.
+# Do not cite any risk_level/decision produced under this config as evidence
+# of real-world accuracy; it only proves the live pipeline mechanically
+# reaches a decision-producing state end to end.
+config_version: t013-synthetic-development-v1-demo-single-day
+protocol_version: 1.0.0
+development_only: true
+
+enrollment:
+  min_windows: 20
+  min_distinct_days: 1
+  calibration_windows: 10
+
+risk:
+  keyboard_weight: 0.5
+  mouse_weight: 0.5
+  ewma_alpha: 0.4
+  medium_threshold: 0.45
+  high_threshold: 0.75
+  breach_k: 3
+  breach_n: 5
+  cooldown_seconds: 60
+  action_budget: 2

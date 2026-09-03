@@ -12,6 +12,7 @@ import yaml
 from pydantic import ValidationError
 
 from protocol.generated.python.contracts import (
+    DataProvenance,
     RetentionConfig,
     StorageDataPolicy,
     StorageEnvironment,
@@ -43,6 +44,22 @@ class StorageSettings:
     @property
     def synthetic_only(self) -> bool:
         return self.data_policy == StorageDataPolicy.SYNTHETIC_ONLY
+
+    @property
+    def collection_provenance(self) -> DataProvenance:
+        """The one provenance a run against this store is allowed to write.
+
+        Provenance is derived from the store's own data policy rather than
+        chosen independently at startup. A `SYNTHETIC_ONLY` store can only ever
+        produce synthetic development data, and an `APPROVED_COLLECTION` store
+        can only ever produce real participant data. Because there is no second
+        place to set it, a real collection run cannot be mislabelled synthetic
+        (or the reverse) by passing the wrong flag.
+        """
+
+        if self.data_policy is StorageDataPolicy.SYNTHETIC_ONLY:
+            return DataProvenance.SYNTHETIC
+        return DataProvenance.PILOT
 
 
 def _substitute_environment(text: str, environment: dict[str, str]) -> str:

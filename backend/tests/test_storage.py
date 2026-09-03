@@ -98,6 +98,7 @@ def _window(provenance: str = "SYNTHETIC") -> FeatureWindow:
                 "category_fractions": {"UNKNOWN": 1.0},
                 "app_switch_rate": 0.0,
                 "device_class": "UNKNOWN",
+                "app_shares": [{"app_id": 0, "category": "UNKNOWN", "fraction": 1.0}],
             },
         }
     )

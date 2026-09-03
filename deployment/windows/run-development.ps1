@@ -1,6 +1,10 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$SyntheticUser,
+    [Alias("SyntheticUser")]
+    [string]$ParticipantId,
+    # Storage profile, which also decides provenance. The default records real
+    # PILOT participant data; pass storage.development.yaml for synthetic runs.
+    [string]$StorageProfile = "storage.pilot.yaml",
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "ContinuousAuthentication/Application")
 )
 
@@ -11,10 +15,10 @@ $Config = Join-Path $InstallRoot "config"
 
 $BackendArguments = @(
     "-m", "backend.app.runtime.cli",
-    "--synthetic-user", $SyntheticUser,
+    "--participant-id", $ParticipantId,
     "--artifact-root", (Join-Path $InstallRoot "models"),
     "--dashboard-directory", (Join-Path $InstallRoot "dashboard"),
-    "--storage-config", (Join-Path $Config "storage.development.yaml"),
+    "--storage-config", (Join-Path $Config $StorageProfile),
     "--collector-config", (Join-Path $Config "collector.development.yaml"),
     "--ingestion-config", (Join-Path $Config "ingestion.development.yaml"),
     "--ml-config", (Join-Path $Config "ml.development.yaml"),
@@ -22,7 +26,8 @@ $BackendArguments = @(
     "--context-config", (Join-Path $Config "context.development.yaml"),
     "--api-config", (Join-Path $Config "api.development.yaml"),
     "--updates-config", (Join-Path $Config "updates.development.yaml"),
-    "--orchestration-config", (Join-Path $Config "orchestration.development.yaml")
+    "--orchestration-config", (Join-Path $Config "orchestration.development.yaml"),
+    "--enforcement-config", (Join-Path $Config "enforcement.development.yaml")
 )
 $Backend = Start-Process -FilePath $Python -ArgumentList $BackendArguments -PassThru
 $Collector = Start-Process -FilePath (Join-Path $InstallRoot "continuous_auth_collector.exe") -ArgumentList @(

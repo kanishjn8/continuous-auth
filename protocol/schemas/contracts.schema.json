@@ -298,10 +298,23 @@
         "scroll_burst_mean": {"type": "number", "minimum": 0}
       }
     },
+    "AppFocusShare": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["app_id", "category", "fraction"],
+      "properties": {
+        "app_id": {"type": "integer", "minimum": 0},
+        "category": {"$ref": "#/$defs/ApplicationCategory"},
+        "fraction": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
     "ContextBlock": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["dominant_category", "category_fractions", "app_switch_rate", "device_class"],
+      "required": [
+        "dominant_category", "category_fractions", "app_switch_rate", "device_class",
+        "app_shares"
+      ],
       "properties": {
         "dominant_category": {"$ref": "#/$defs/ApplicationCategory"},
         "category_fractions": {
@@ -309,7 +322,11 @@
           "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
         },
         "app_switch_rate": {"type": "number", "minimum": 0},
-        "device_class": {"$ref": "#/$defs/InputDeviceClass"}
+        "device_class": {"$ref": "#/$defs/InputDeviceClass"},
+        "app_shares": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/AppFocusShare"}
+        }
       }
     },
     "FeatureWindow": {
@@ -828,17 +845,27 @@
         "calibration_windows": {"type": "integer", "minimum": 1}
       }
     },
+    "ContextAdjustmentMode": {
+      "type": "string",
+      "enum": ["MULTIPLICATIVE_DAMPING", "PER_CONTEXT_NORMALIZATION"]
+    },
     "ContextConfig": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["confidence_floor", "min_empirical_observations", "bootstrap_weights"],
+      "required": [
+        "confidence_floor", "min_empirical_observations", "bootstrap_weights",
+        "adjustment_mode", "variance_scale", "normalization_min_scale"
+      ],
       "properties": {
         "confidence_floor": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
         "min_empirical_observations": {"type": "integer", "minimum": 1},
         "bootstrap_weights": {
           "type": "object",
           "additionalProperties": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
-        }
+        },
+        "adjustment_mode": {"$ref": "#/$defs/ContextAdjustmentMode"},
+        "variance_scale": {"type": "number", "exclusiveMinimum": 0},
+        "normalization_min_scale": {"type": "number", "exclusiveMinimum": 0}
       }
     },
     "RiskConfig": {

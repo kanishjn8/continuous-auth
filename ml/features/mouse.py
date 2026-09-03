@@ -171,7 +171,13 @@ def compute_mouse_features(
         micro_pause_counts.append(pauses)
 
         straight_dist = math.hypot((seg[-1].x - seg[0].x) * sx, (seg[-1].y - seg[0].y) * sy)
-        straightness_ratios.append(straight_dist / seg_path_length if seg_path_length > 0 else 0.0)
+        # A perfectly straight segment makes the ratio exactly 1 in exact
+        # arithmetic, but summing per-step distances can overshoot the direct
+        # distance by an ulp or two. The contract bounds this feature to
+        # [0, 1], so clamp rather than emit a value the schema rejects.
+        straightness_ratios.append(
+            min(1.0, straight_dist / seg_path_length) if seg_path_length > 0 else 0.0
+        )
 
     # Clicks: match BUTTON_DOWN -> next BUTTON_UP of the same button (FIFO).
     from collections import deque

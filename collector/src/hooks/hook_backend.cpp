@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <array>
+#include <cstdio>
 #include <limits>
 #include <sstream>
 #endif
@@ -136,6 +137,9 @@ private:
             down, static_cast<std::int64_t>(captured), classified, repeated,
             InputDeviceClass::kUnknown, active_backend->publisher_.current_app(),
             active_backend->publisher_.next_sequence()});
+        std::fprintf(stderr, "[COLLECTOR] keyboard %s (class=%d)\n", down ? "DOWN" : "UP",
+                     static_cast<int>(classified));
+        std::fflush(stderr);
       }
     }
     return CallNextHookEx(nullptr, code, message, payload);
@@ -191,6 +195,9 @@ private:
             native_event->pt.y, button, horizontal, vertical,
             InputDeviceClass::kUnknown, active_backend->publisher_.current_app(),
             active_backend->publisher_.next_sequence()});
+        std::fprintf(stderr, "[COLLECTOR] mouse type=%d at (%ld,%ld)\n", static_cast<int>(*type),
+                     native_event->pt.x, native_event->pt.y);
+        std::fflush(stderr);
       }
     }
     return CallNextHookEx(nullptr, code, message, payload);

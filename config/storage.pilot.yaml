@@ -1,0 +1,45 @@
+# Approved-collection storage profile for real participant data.
+#
+# This is the profile used by a normal collection run. It stores PILOT data:
+# `data_policy: APPROVED_COLLECTION` is what makes the runtime tag windows
+# PILOT (see `StorageSettings.collection_provenance`), and it is also what the
+# storage layer checks before accepting a record, so a run against this profile
+# cannot write synthetic data and a run against the development profile cannot
+# write participant data.
+#
+# It deliberately writes to a *different* root directory than
+# `storage.development.yaml`. Existing synthetic development data stays exactly
+# where it is, untouched and still usable, and the two corpora never mix.
+#
+# Real participant data requires consent and enrollment records before it is
+# evaluation-eligible (see docs/pilot/). This file provisions storage; it does
+# not grant permission to collect.
+
+config_version: storage-pilot-1
+protocol_version: 1.0.0
+
+storage:
+  environment: PILOT
+  data_policy: APPROVED_COLLECTION
+  root_directory: "${LOCALAPPDATA}/ContinuousAuthentication/Pilot"
+  database_filename: continuous-auth.db
+  audit_directory_name: audit
+  busy_timeout_ms: 5000
+
+# Retention must outlast the collection period, the freeze, and the analysis
+# that follows it. The development profile keeps 7 days because its data is
+# disposable; deleting a participant's early collection days before the corpus
+# is frozen would destroy exactly the day-disjoint coverage the evaluation
+# depends on and cannot be recollected.
+#
+# These are engineering values for the current collection round, not an
+# approved retention policy: ADR-012 and the pilot protocol remain the
+# authority, and a real deployment must set them through that review.
+retention:
+  feature_window_days: 120
+  score_days: 120
+  audit_compress_after_days: 7
+  audit_delete_after_days: 120
+  # The contract forbids raw debug capture whenever pilot_mode is true.
+  raw_debug_capture_enabled: false
+  pilot_mode: true

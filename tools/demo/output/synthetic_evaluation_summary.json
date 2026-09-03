@@ -1,0 +1,20 @@
+{
+  "alice": {
+    "eer": 0.0,
+    "eer_threshold": 0.6953333333333334,
+    "n_genuine_windows": 60,
+    "n_impostor_windows": 30,
+    "impostor_users": [
+      "bob"
+    ]
+  },
+  "bob": {
+    "eer": 0.075,
+    "eer_threshold": 8.018666666666666,
+    "n_genuine_windows": 30,
+    "n_impostor_windows": 60,
+    "impostor_users": [
+      "alice"
+    ]
+  }
+}

@@ -1,8 +1,28 @@
 {
+  "_comment": [
+    "OPTIONAL cold-start prior, deliberately left empty by default.",
+    "",
+    "This map is NOT required for the authentication pipeline to work, and it",
+    "is intentionally not populated with a process list. AGENTS.md constraint 1",
+    "forbids application-specific integration, and a maintained process->category",
+    "dictionary is exactly the 'fixed list of supported applications' that the",
+    "app-aware architecture reference (section 14) rules out: it would need an",
+    "entry for every application that ever matters, and it would silently decay",
+    "as applications are renamed, updated, or replaced.",
+    "",
+    "Instead, ContextConfidenceLayer keys its empirical statistics on the",
+    "collector's opaque app_id and learns each application's behavioural",
+    "variance from the individual user's own genuine scores. An unmapped",
+    "application resolves to UNKNOWN, receives the neutral UNKNOWN bootstrap",
+    "prior, and then adapts on its own evidence -- so a brand-new application",
+    "installed tomorrow needs no entry here, no model, and no integration.",
+    "",
+    "Adding entries only changes the cold-start prior used before an",
+    "application has been observed enough times. It never creates a per-app",
+    "model or a per-app code path, and the system must keep working with this",
+    "map empty."
+  ],
   "config_version": "bootstrap-unreviewed",
   "default_category": "UNKNOWN",
   "process_categories": {}
 }
-
-
-

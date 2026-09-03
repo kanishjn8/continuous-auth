@@ -38,6 +38,9 @@ try {
 
 Copy-Item (Join-Path $Repository "build/collector-package/Release/continuous_auth_collector.exe") $Stage
 Copy-Item (Join-Path $Repository "config/*.development.yaml") (Join-Path $Stage "config")
+# The approved-collection profile is what a normal run uses; without it the
+# packaged install would fall back to nothing and fail to start.
+Copy-Item (Join-Path $Repository "config/storage.pilot.yaml") (Join-Path $Stage "config")
 Copy-Item (Join-Path $Repository "config/app_categories.yaml") (Join-Path $Stage "config")
 Copy-Item (Join-Path $Repository "dashboard/dist/*") (Join-Path $Stage "dashboard") -Recurse
 Copy-Item (Join-Path $PSScriptRoot "install.ps1") $Stage

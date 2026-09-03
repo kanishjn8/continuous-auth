@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from ml.features.extractor import extract_windows
-from ml.features.schema import KeyClass, Provenance, QualityLabel
+from ml.features.schema import AppCategory, ContextEvent, KeyClass, Provenance, QualityLabel
 from ml.tests.conftest import kbd, mouse_move
 
 
@@ -144,6 +146,7 @@ def test_context_never_appears_in_identity_feature_arrays(ml_config):
         "category_fractions",
         "app_switch_rate",
         "device_class",
+        "app_shares",
     }
     assert context_field_names.isdisjoint((kbd_features or {}).keys())
     assert context_field_names.isdisjoint((mouse_features or {}).keys())
@@ -183,3 +186,117 @@ def test_trailing_partial_window_is_not_dropped(ml_config):
         config=ml_config,
     )
     assert len(windows) == 1
+
+
+def _context(seq: int, t_us: int, app_id: int, category: AppCategory) -> ContextEvent:
+    return ContextEvent(t_capture_us=t_us, app_id=app_id, category=category, seq=seq)
+
+
+def _windows_with_context(ml_config, context_events, *, span_us: int):
+    """One long keystroke stream so a single window spans the whole span."""
+
+    step = max(span_us // 40, 1)
+    kbd_events = [
+        kbd(i, i * step, KeyClass.ALPHA_L_HOME, "KEY_DOWN") for i in range(span_us // step)
+    ]
+    return extract_windows(
+        kbd_events,
+        [],
+        context_events,
+        user_id="u1",
+        session_id="s1",
+        segment_id="seg1",
+        collection_day="2026-08-25",
+        provenance=Provenance.SYNTHETIC,
+        config=ml_config,
+    )
+
+
+def test_app_shares_report_the_single_focused_application(ml_config):
+    windows = _windows_with_context(
+        ml_config,
+        [_context(0, 0, 501, AppCategory.PRODUCTIVITY)],
+        span_us=2_000_000,
+    )
+    assert windows
+    shares = windows[0].context.app_shares
+    assert [s.app_id for s in shares] == [501]
+    assert shares[0].category == AppCategory.PRODUCTIVITY
+    assert shares[0].fraction == 1.0
+
+
+def test_app_shares_split_a_window_that_spans_a_switch(ml_config):
+    span = 2_000_000
+    windows = _windows_with_context(
+        ml_config,
+        [
+            _context(0, 0, 501, AppCategory.PRODUCTIVITY),
+            _context(1, span // 2, 502, AppCategory.GAMING),
+        ],
+        span_us=span,
+    )
+    shares = windows[0].context.app_shares
+    assert {s.app_id for s in shares} == {501, 502}
+    assert sum(s.fraction for s in shares) == pytest.approx(1.0)
+    # Both applications are represented, so neither is silently discarded in
+    # favour of the dominant one.
+    assert all(0.0 < s.fraction < 1.0 for s in shares)
+
+
+def test_app_shares_are_consistent_with_category_fractions(ml_config):
+    span = 2_000_000
+    windows = _windows_with_context(
+        ml_config,
+        [
+            _context(0, 0, 501, AppCategory.PRODUCTIVITY),
+            _context(1, span // 2, 502, AppCategory.GAMING),
+        ],
+        span_us=span,
+    )
+    context = windows[0].context
+    rolled_up: dict[str, float] = {}
+    for share in context.app_shares:
+        rolled_up[share.category.value] = rolled_up.get(share.category.value, 0.0) + share.fraction
+    for category, fraction in context.category_fractions.items():
+        assert rolled_up[category] == pytest.approx(fraction)
+
+
+def test_app_shares_ordering_is_deterministic(ml_config):
+    span = 2_000_000
+    events = [
+        _context(0, 0, 501, AppCategory.PRODUCTIVITY),
+        _context(1, span // 4, 502, AppCategory.GAMING),
+    ]
+    first = _windows_with_context(ml_config, events, span_us=span)
+    second = _windows_with_context(ml_config, events, span_us=span)
+    assert [w.model_dump() for w in first] == [w.model_dump() for w in second]
+    shares = first[0].context.app_shares
+    assert [s.fraction for s in shares] == sorted((s.fraction for s in shares), reverse=True)
+
+
+def test_window_without_context_events_is_unattributed_not_dropped(ml_config):
+    windows = _windows_with_context(ml_config, [], span_us=2_000_000)
+    shares = windows[0].context.app_shares
+    assert len(shares) == 1
+    assert shares[0].category == AppCategory.UNKNOWN
+    assert shares[0].fraction == 1.0
+
+
+def test_every_window_carries_exactly_one_unit_of_focus(ml_config):
+    """No window may end up with an empty focus mixture, degenerate or not."""
+
+    span = 2_000_000
+    windows = _windows_with_context(
+        ml_config,
+        [
+            _context(0, 0, 501, AppCategory.PRODUCTIVITY),
+            _context(1, span // 3, 502, AppCategory.GAMING),
+            _context(2, 2 * span // 3, 503, AppCategory.DEVELOPMENT),
+        ],
+        span_us=span,
+    )
+    assert windows
+    for window in windows:
+        assert window.context.app_shares
+        assert sum(s.fraction for s in window.context.app_shares) == pytest.approx(1.0)
+        assert sum(window.context.category_fractions.values()) == pytest.approx(1.0)

@@ -12,6 +12,8 @@ from protocol.generated.python.contracts import PROTOCOL_VERSION
 from .api.backend import SQLiteApiBackend
 from .api.config import load_api_settings
 from .api.routes import create_api_app
+from .decisions.challenge import ChallengeService
+from .decisions.config import load_enforcement_settings
 from .storage.config import load_storage_settings
 from .storage.service import StorageService
 from .updates.manager import UpdateManager
@@ -40,16 +42,23 @@ def create_runtime_app(
     api_config: Path | None = None,
     update_manager: UpdateManager | None = None,
     shadow_mode_setter: Callable[[bool], None] | None = None,
+    enforcement_config: Path | None = None,
 ) -> FastAPI:
     """Open local persistence and return the complete authenticated API/stream app."""
 
     storage_settings = load_storage_settings(storage_config, workspace_root=workspace_root)
     storage = StorageService.open(storage_settings)
+    # The challenge surface is available in every run mode so first-run setup
+    # can complete; the native enforcement adapters it feeds are separately
+    # gated by configuration and by platform.
+    enforcement_settings = load_enforcement_settings(enforcement_config)
     backend = SQLiteApiBackend(
         storage,
         active_user_provider=active_user_provider,
         update_manager=update_manager,
         shadow_mode_setter=shadow_mode_setter,
+        challenge_service=ChallengeService(storage, enforcement_settings),
+        enforcement_settings=enforcement_settings,
     )
     return create_api_app(
         settings=load_api_settings(api_config),

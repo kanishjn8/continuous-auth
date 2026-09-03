@@ -1,11 +1,28 @@
 # T-012 local/synthetic policy only. Bootstrap weights and the empirical
 # observation requirement remain provisional pending category data and review.
-config_version: t012-synthetic-development-v1
+#
+# Empirical statistics are keyed on the collector's opaque app_id, NOT on the
+# category taxonomy, so these bootstrap weights act only as a cold-start prior
+# for an application the user has not yet been observed in. Once an application
+# has `min_empirical_observations` of focus-weighted genuine evidence, that
+# application's own observed variance supersedes the prior -- including for
+# UNKNOWN, so an unmapped or brand-new application still adapts.
+config_version: t012-synthetic-development-v2
 protocol_version: 1.0.0
 development_only: true
 context:
   confidence_floor: 0.5
   min_empirical_observations: 4
+  # Selected by tools/../ml/experiments/context_damping.py; see that module and
+  # the recorded comparison for the context-stratified FAR/FRR evidence.
+  adjustment_mode: PER_CONTEXT_NORMALIZATION
+  # Scores are bounded in [0,1], so their maximum population variance is 0.25.
+  # 1/0.25 = 4.0 maps that bound onto a [0,1] confidence.
+  variance_scale: 4.0
+  # Lower bound on an estimated standard deviation before it is used as a
+  # divisor, so a near-constant context cannot amplify a small score
+  # difference into a saturated risk value.
+  normalization_min_scale: 0.02
   bootstrap_weights:
     PRODUCTIVITY: 0.9
     BROWSING: 0.85

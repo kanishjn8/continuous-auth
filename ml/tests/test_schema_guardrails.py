@@ -100,6 +100,7 @@ def test_context_block_rejects_unknown_category_keys():
             category_fractions={"possible-user-content": 1.0},
             app_switch_rate=0.0,
             device_class="UNKNOWN",
+            app_shares=[{"app_id": 0, "category": "UNKNOWN", "fraction": 1.0}],
         )
 
 

@@ -1,6 +1,6 @@
 """Integrated local runtime and Windows named-pipe service."""
 
-from .application import IntegratedApplication, create_synthetic_development_application
+from .application import IntegratedApplication, create_collection_application
 from .collector_config import CollectorRuntimeConfigError, load_collector_config
 from .config import OrchestrationSettings, load_orchestration_settings
 from .named_pipe import NamedPipeError, WindowsNamedPipeServer
@@ -21,5 +21,5 @@ __all__ = [
     "WindowsNamedPipeServer",
     "load_orchestration_settings",
     "load_collector_config",
-    "create_synthetic_development_application",
+    "create_collection_application",
 ]

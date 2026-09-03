@@ -1,0 +1,36 @@
+# Enforcement tunables for the native challenge/termination path.
+#
+# Repository rule: every tunable value lives under the root `config/`
+# directory. The security question and answer are NOT here -- they are a
+# participant-chosen credential, so they live in the ignored local database
+# via `storage_metadata` (AGENTS.md constraint 8), never in a tracked file.
+#
+# `enabled: false` is the safe default and must stay false during ordinary
+# collection and calibration. Real enforcement locks the actual workstation;
+# a false positive during a participant's working day would both disrupt them
+# and contaminate the collected corpus. Turn it on only for the controlled
+# enforcement/hijack drill (PLAN.md Section 13.3).
+
+config_version: enforcement-development-v1
+protocol_version: 1.0.0
+development_only: true
+
+enforcement:
+  # Master switch for real OS-level enforcement. False = decisions are still
+  # computed, recorded, and streamed, but no native prompt or workstation lock
+  # is executed.
+  enabled: false
+
+  # Show the native always-on-top prompt for SOFT_CHALLENGE / REAUTH.
+  native_prompt: true
+
+  # Lock the real Windows workstation on TERMINATE. Requires `enabled`.
+  lock_workstation: true
+
+  # A dispatched challenge that is never answered expires after this many
+  # seconds. Expiry is recorded as a failed response, which is what the
+  # escalation ladder (PLAN.md 11.3) treats as a failed reauthentication.
+  challenge_timeout_seconds: 120.0
+
+  # PBKDF2-HMAC-SHA256 iteration count for the stored answer digest.
+  answer_hash_iterations: 240000

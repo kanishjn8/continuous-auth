@@ -248,6 +248,50 @@ class EnforcementCoordinator:
             self._store.record_verification(verification)
         return verification
 
+    def record_challenge_response(
+        self,
+        *,
+        decision_id: str,
+        requested_action: DecisionAction,
+        user_id: str,
+        session_id: str,
+        segment_id: str | None,
+        accepted: bool,
+        code: str,
+        evidence_reference: str | None = None,
+        responded_at: datetime | None = None,
+    ) -> ActionOutcome:
+        """Close out an asynchronously answered challenge.
+
+        A correct answer to a ``REAUTH`` is an A2 anchor: the segment is
+        anchored to an explicit successful reauthentication (PLAN.md 12.2).
+        A wrong or expired answer records the failed outcome and creates no
+        anchor, so it can never qualify a segment for training promotion.
+        """
+
+        now = responded_at or _utc_now()
+        verification: VerificationRecord | None = None
+        if accepted and requested_action is DecisionAction.REAUTH and evidence_reference:
+            verification = VerificationRecord(
+                anchor_id=self._anchor_id_factory(),
+                user_id=user_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                anchor_type=VerificationAnchor.A2_REAUTH,
+                evidence_reference=_evidence_digest(evidence_reference),
+                authenticated_at=now,
+            )
+        return self._record(
+            ActionOutcome(
+                decision_id,
+                requested_action,
+                ActionStatus.SUCCEEDED if accepted else ActionStatus.CANCELLED,
+                code,
+                now,
+                verification,
+            )
+        )
+
     def _fail_open(
         self,
         decision: RiskDecision,

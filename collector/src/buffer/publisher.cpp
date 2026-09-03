@@ -45,8 +45,6 @@ std::int64_t EventPublisher::next_sequence() noexcept {
     }
   }
 }
-  return value;
-}
 
 bool EventPublisher::publish(continuous_auth::protocol::v1::EventFrame event) noexcept {
   return buffer_.try_push(BufferedEvent(std::move(event)));

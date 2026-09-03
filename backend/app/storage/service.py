@@ -201,11 +201,26 @@ class StorageService:
         )
 
     def _enforce_provenance(self, provenance: DataProvenance | list[DataProvenance]) -> None:
+        """Reject any record whose provenance disagrees with the store's policy.
+
+        Both directions are refused. A synthetic-only development store must
+        never receive participant data, and an approved-collection store must
+        never receive synthetic data: silently mixing the two would make the
+        corpus unusable for evaluation and impossible to audit afterwards.
+        """
+
         values = provenance if isinstance(provenance, list) else [provenance]
-        if self.settings.synthetic_only and any(
-            value != DataProvenance.SYNTHETIC for value in values
-        ):
-            raise StorageUnavailableError("development storage accepts SYNTHETIC provenance only")
+        if self.settings.synthetic_only:
+            if any(value != DataProvenance.SYNTHETIC for value in values):
+                raise StorageUnavailableError(
+                    "development storage accepts SYNTHETIC provenance only"
+                )
+            return
+        if any(value == DataProvenance.SYNTHETIC for value in values):
+            raise StorageUnavailableError(
+                "approved-collection storage rejects SYNTHETIC provenance; "
+                "use the development storage profile for synthetic runs"
+            )
 
     def upsert_user(self, user_id: str, state: UserState) -> None:
         def work() -> None:
@@ -743,6 +758,76 @@ class StorageService:
             self.flush_audit()
 
         self._guard("set_shadow_mode", work)
+
+    def security_challenge_document(self) -> str | None:
+        """Load the opaque stored challenge document, or None when unconfigured.
+
+        Storage deliberately treats the document as opaque: the question,
+        salt, and answer digest are serialised by the decisions layer, which
+        owns the credential format. Nothing here ever sees a plaintext answer.
+        """
+
+        def work() -> str | None:
+            with self.database.connection() as connection:
+                row = connection.execute(
+                    "SELECT metadata_value FROM storage_metadata WHERE metadata_key = ?",
+                    ("security_challenge",),
+                ).fetchone()
+            if row is None:
+                return None
+            document = str(row["metadata_value"])
+            if not document.strip():
+                raise StorageIntegrityError("stored security challenge is empty")
+            return document
+
+        return self._guard("security_challenge_document", work)
+
+    def set_security_challenge_document(self, document: str) -> None:
+        """Persist and audit a challenge configuration or rotation atomically.
+
+        The audit payload records only that a challenge was set and whether it
+        replaced an existing one. The question, salt, and digest are never
+        written to the audit log.
+        """
+
+        if not document.strip():
+            raise ValueError("security challenge document must not be blank")
+
+        def work() -> None:
+            occurred = _utc_text()
+            audit_id = str(uuid.uuid4())
+            with self.database.transaction() as connection:
+                existing = connection.execute(
+                    "SELECT 1 FROM storage_metadata WHERE metadata_key = ?",
+                    ("security_challenge",),
+                ).fetchone()
+                connection.execute(
+                    """
+                    INSERT INTO storage_metadata(metadata_key, metadata_value, updated_at_utc)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(metadata_key) DO UPDATE SET
+                        metadata_value = excluded.metadata_value,
+                        updated_at_utc = excluded.updated_at_utc
+                    """,
+                    ("security_challenge", document, occurred),
+                )
+                self._queue_audit(
+                    connection,
+                    record_id=f"challenge:{audit_id}",
+                    event_type="SECURITY_CHALLENGE_CHANGED",
+                    occurred_at_utc=occurred,
+                    correlation_id=audit_id,
+                    payload_json=_json(
+                        {
+                            "schema_version": PROTOCOL_VERSION,
+                            "configured": True,
+                            "rotated": existing is not None,
+                        }
+                    ),
+                )
+            self.flush_audit()
+
+        self._guard("set_security_challenge_document", work)
 
     def store_model(self, artifact: ModelArtifact) -> None:
         def work() -> None:

@@ -21,6 +21,7 @@ from ml.features.keyboard import KEYBOARD_FEATURE_NAMES
 from ml.features.schema import (
     FEATURE_SCHEMA_VERSION,
     AppCategory,
+    AppFocusShare,
     ContextBlock,
     DeviceClass,
     FeatureWindow,
@@ -152,6 +153,9 @@ def _fake_window(window_id, *, feature_schema_version=FEATURE_SCHEMA_VERSION):
             category_fractions={AppCategory.UNKNOWN.value: 1.0},
             app_switch_rate=0.0,
             device_class=DeviceClass.UNKNOWN,
+            app_shares=[
+                AppFocusShare(app_id=0, category=AppCategory.UNKNOWN, fraction=1.0)
+            ],
         ),
     )
     if feature_schema_version != FEATURE_SCHEMA_VERSION:

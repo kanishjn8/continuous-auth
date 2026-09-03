@@ -10,6 +10,19 @@ from .adapters import (
     EnforcementNotice,
     VerificationRecord,
 )
+from .challenge import (
+    ChallengeCredential,
+    ChallengeError,
+    ChallengeNotConfigured,
+    ChallengeService,
+    InvalidChallengeSetup,
+    PendingChallenge,
+    ResponseOutcome,
+    ResponseResult,
+    UnknownChallenge,
+)
+from .config import EnforcementSettings, load_enforcement_settings
+from .native import NativeChallengeAdapter, WindowsLockAdapter
 from .policy import DecisionPolicy, PolicyResult
 
 __all__ = [
@@ -17,10 +30,23 @@ __all__ = [
     "ActionOutcome",
     "ActionStatus",
     "CallbackActionAdapter",
+    "ChallengeCredential",
+    "ChallengeError",
+    "ChallengeNotConfigured",
+    "ChallengeService",
     "ContinueAdapter",
     "DecisionPolicy",
     "EnforcementCoordinator",
     "EnforcementNotice",
+    "EnforcementSettings",
+    "InvalidChallengeSetup",
+    "NativeChallengeAdapter",
+    "PendingChallenge",
     "PolicyResult",
+    "ResponseOutcome",
+    "ResponseResult",
+    "UnknownChallenge",
     "VerificationRecord",
+    "WindowsLockAdapter",
+    "load_enforcement_settings",
 ]

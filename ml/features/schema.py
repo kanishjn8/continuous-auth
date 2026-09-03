@@ -23,6 +23,9 @@ from protocol.generated.python.contracts import (
     WindowQuality,
 )
 from protocol.generated.python.contracts import (
+    AppFocusShare as GeneratedAppFocusShare,
+)
+from protocol.generated.python.contracts import (
     ContextBlock as GeneratedContextBlock,
 )
 from protocol.generated.python.contracts import (
@@ -55,6 +58,7 @@ FEATURE_SCHEMA_VERSION = PROTOCOL_VERSION
 
 __all__ = [
     "AppCategory",
+    "AppFocusShare",
     "ContextBlock",
     "ContextEvent",
     "CORRECTION_CLASSES",
@@ -147,8 +151,13 @@ class MouseFeatures(_FeatureMapping, GeneratedMouseFeatures):
     pass
 
 
+AppFocusShare = GeneratedAppFocusShare
+
+
 class ContextBlock(GeneratedContextBlock):
     """Canonical context with a stricter application-category key boundary."""
+
+    app_shares: list[AppFocusShare]
 
     @field_validator("category_fractions")
     @classmethod
@@ -160,6 +169,24 @@ class ContextBlock(GeneratedContextBlock):
         total = sum(value.values())
         if value and not 0.99 <= total <= 1.01:
             raise ValueError(f"category_fractions must sum to approximately 1.0, got {total}")
+        return value
+
+    @field_validator("app_shares")
+    @classmethod
+    def validate_app_shares(cls, value: list[AppFocusShare]) -> list[AppFocusShare]:
+        """Application shares partition the same window as category fractions.
+
+        A duplicated ``(app_id, category)`` pair would double-count that
+        application's weight in the confidence mixture, so it is rejected here
+        rather than silently skewing the per-application empirical statistics.
+        """
+
+        keys = [(share.app_id, share.category) for share in value]
+        if len(keys) != len(set(keys)):
+            raise ValueError("app_shares must not repeat an (app_id, category) pair")
+        total = sum(share.fraction for share in value)
+        if value and not 0.99 <= total <= 1.01:
+            raise ValueError(f"app_shares fractions must sum to approximately 1.0, got {total}")
         return value
 
 

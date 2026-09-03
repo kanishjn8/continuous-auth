@@ -46,10 +46,12 @@ services:
     restart: unless-stopped
     networks:
       - application
+      - edge
 
 networks:
   application:
     internal: true
+  edge: {}
 
 volumes:
   runtime-data:

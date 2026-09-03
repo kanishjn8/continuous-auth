@@ -21,4 +21,5 @@ try {
     throw
 }
 Write-Output "Installed at $InstallRoot"
-Write-Output "Set CA_DASHBOARD_SECRET, then run run-development.ps1 -SyntheticUser <pseudonym>."
+Write-Output "Set CA_DASHBOARD_SECRET, then run run-development.ps1 -ParticipantId <pseudonym>."
+Write-Output "That records real PILOT participant data. For a synthetic run add: -StorageProfile storage.development.yaml"

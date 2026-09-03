@@ -20,6 +20,7 @@ from ml.features.keyboard import compute_keyboard_features
 from ml.features.mouse import compute_mouse_features
 from ml.features.schema import (
     AppCategory,
+    AppFocusShare,
     ContextBlock,
     ContextEvent,
     DeviceClass,
@@ -53,42 +54,74 @@ class WindowConfig:
         return int(self.window_seconds * 1_000_000)
 
 
+#: Focus identity for a window interval with no preceding APP_FOCUS_CHANGE.
+#: ``app_id`` 0 is reserved by the collector's ``stable_app_id`` domain for
+#: "no attributable foreground application", so it never collides with a real
+#: process hash.
+_UNATTRIBUTED_APP_ID = 0
+
+
 class _ContextTimeline:
-    """Precomputed focus-category intervals for O(log n) per-window lookup."""
+    """Precomputed focus intervals for O(log n) per-window lookup.
+
+    Tracks the foreground ``app_id`` alongside its category so a window can
+    report both a category mixture (interpretation) and a per-application
+    mixture (per-user empirical learning). Application identity here is the
+    collector's opaque ``stable_app_id`` integer -- never a process name,
+    title, or path.
+    """
 
     def __init__(self, context_events: Sequence[ContextEvent]):
         ordered = sorted(context_events, key=lambda e: (e.t_capture_us, e.seq))
         self._starts: list[int] = [e.t_capture_us for e in ordered]
         self._categories: list[AppCategory] = [e.category for e in ordered]
+        self._app_ids: list[int] = [e.app_id for e in ordered]
 
-    def fractions_and_switches(
+    def focus_shares(
         self, t_start: int, t_end: int
-    ) -> tuple[dict[AppCategory, float], int]:
+    ) -> tuple[dict[AppCategory, float], dict[tuple[int, AppCategory], float], int]:
+        """Return (category fractions, per-(app_id, category) fractions, switches)."""
+
         duration = max(t_end - t_start, 1)
         if not self._starts:
-            return {AppCategory.UNKNOWN: 1.0}, 0
+            unattributed = (_UNATTRIBUTED_APP_ID, AppCategory.UNKNOWN)
+            return {AppCategory.UNKNOWN: 1.0}, {unattributed: 1.0}, 0
 
-        # Category active at t_start: the last focus change at or before t_start.
+        # Focus active at t_start: the last focus change at or before t_start.
         idx = bisect.bisect_right(self._starts, t_start) - 1
         cat = self._categories[idx] if idx >= 0 else AppCategory.UNKNOWN
+        app_id = self._app_ids[idx] if idx >= 0 else _UNATTRIBUTED_APP_ID
         cursor = t_start
 
         totals: dict[AppCategory, float] = {}
+        app_totals: dict[tuple[int, AppCategory], float] = {}
         switches = 0
         j = idx + 1
         while j < len(self._starts) and self._starts[j] < t_end:
             seg_end = self._starts[j]
             if seg_end > cursor:
-                totals[cat] = totals.get(cat, 0.0) + (seg_end - cursor)
+                span = seg_end - cursor
+                totals[cat] = totals.get(cat, 0.0) + span
+                app_totals[(app_id, cat)] = app_totals.get((app_id, cat), 0.0) + span
             cat = self._categories[j]
+            app_id = self._app_ids[j]
             cursor = seg_end
             switches += 1
             j += 1
         if cursor < t_end:
-            totals[cat] = totals.get(cat, 0.0) + (t_end - cursor)
+            span = t_end - cursor
+            totals[cat] = totals.get(cat, 0.0) + span
+            app_totals[(app_id, cat)] = app_totals.get((app_id, cat), 0.0) + span
+
+        if not totals:
+            # A degenerate (zero-length) window still occurred somewhere; report
+            # the focus active at its start rather than an empty mixture, so
+            # every window carries exactly one unit of attributable focus.
+            return {cat: 1.0}, {(app_id, cat): 1.0}, switches
 
         fractions = {k: v / duration for k, v in totals.items()}
-        return fractions, switches
+        app_fractions = {k: v / duration for k, v in app_totals.items()}
+        return fractions, app_fractions, switches
 
     def add(self, event: ContextEvent) -> None:
         """Add a live focus change while preserving capture-time ordering."""
@@ -96,6 +129,7 @@ class _ContextTimeline:
         index = bisect.bisect_right(self._starts, event.t_capture_us)
         self._starts.insert(index, event.t_capture_us)
         self._categories.insert(index, event.category)
+        self._app_ids.insert(index, event.app_id)
 
 
 def _dominant_device_class(
@@ -118,14 +152,23 @@ def _build_context_block(
     kbd: Sequence[KeyboardEvent],
     mouse: Sequence[MouseEvent],
 ) -> ContextBlock:
-    fractions, switches = timeline.fractions_and_switches(t_start, t_end)
+    fractions, app_fractions, switches = timeline.focus_shares(t_start, t_end)
     duration_minutes = max(t_end - t_start, 1) / 1_000_000.0 / 60.0
     dominant = max(fractions.items(), key=lambda kv: kv[1])[0] if fractions else AppCategory.UNKNOWN
+    # Deterministic ordering (largest share first, then app_id) so an identical
+    # event stream always yields a byte-identical context block.
+    shares = [
+        AppFocusShare(app_id=app_id, category=category, fraction=fraction)
+        for (app_id, category), fraction in sorted(
+            app_fractions.items(), key=lambda kv: (-kv[1], kv[0][0])
+        )
+    ]
     return ContextBlock(
         dominant_category=dominant,
         category_fractions={category.value: fraction for category, fraction in fractions.items()},
         app_switch_rate=(switches / duration_minutes) if duration_minutes > 0 else 0.0,
         device_class=_dominant_device_class(kbd, mouse),
+        app_shares=shares,
     )
 
 

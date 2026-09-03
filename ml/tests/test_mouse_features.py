@@ -202,3 +202,25 @@ def test_determinism_same_input_same_output():
     r1 = compute_mouse_features(events, window_duration_us=200_000, **DEFAULT_KW)
     r2 = compute_mouse_features(list(events), window_duration_us=200_000, **DEFAULT_KW)
     assert r1 == r2
+
+
+def test_perfectly_straight_path_stays_inside_the_contract_bound(ml_config):
+    """Floating-point summation must not push straightness_ratio above 1.0."""
+
+    from ml.features.mouse import compute_mouse_features
+    from ml.tests.conftest import mouse_move
+
+    events = [mouse_move(i, i * 20_000, 100 + i, 100 + i) for i in range(60)]
+    features = compute_mouse_features(
+        events,
+        segment_gap_us=ml_config.feature_computation.mouse_segment_gap_us,
+        micro_pause_us=ml_config.feature_computation.mouse_micro_pause_us,
+        double_click_max_gap_us=ml_config.feature_computation.double_click_max_gap_us,
+        scroll_burst_gap_us=ml_config.feature_computation.scroll_burst_gap_us,
+        window_duration_us=60 * 20_000,
+        reference_resolution=(
+            ml_config.feature_computation.reference_screen_width_px,
+            ml_config.feature_computation.reference_screen_height_px,
+        ),
+    )
+    assert 0.0 <= features["straightness_ratio"] <= 1.0

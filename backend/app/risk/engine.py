@@ -203,7 +203,7 @@ class RiskEngine:
         except Exception as exc:
             return self._failure_outcome(request, f"{type(exc).__name__}: {exc}")
 
-        adjusted = fused * request.context.confidence
+        adjusted = request.context.adjust(fused)
         previous = self._smoothed
         alpha = self.settings.risk.ewma_alpha
         self._smoothed = adjusted if previous is None else alpha * adjusted + (1 - alpha) * previous
