@@ -23,3 +23,4 @@ button:hover { filter: brightness(1.12); } button:focus-visible, input:focus-vis
 .challenge-form .form-error { margin: 0 0 .75rem; font-size: .8rem; }
 .challenge-form button { margin-top: .75rem; }
 .challenge-notice { margin: 0; padding: .7rem 1.5rem; background: #4a2c07; border-bottom: 1px solid #7a4a0c; color: #ffd9a3; font-size: .82rem; }
+.challenge-notice--scheduled { background: #0d2b45; border-bottom-color: #1d5680; color: #bfe3ff; }

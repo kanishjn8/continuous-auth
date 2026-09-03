@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   ANSWER_INPUT_TYPE,
+  isScheduledVerification,
   MIN_ANSWER_LENGTH,
   MIN_QUESTION_LENGTH,
   validateChallengeSetup,
@@ -132,4 +133,12 @@ test("a synthetic development store is distinguished from a real one", () => {
     config_version: "storage-development-1",
   };
   assert.equal(provenance.collection_provenance, "SYNTHETIC");
+});
+
+test("a scheduled anchor prompt is recognised by its decision id", () => {
+  assert.equal(isScheduledVerification("scheduled-anchor:abc123"), true);
+});
+
+test("an enforcement challenge is not mistaken for a scheduled prompt", () => {
+  assert.equal(isScheduledVerification("decision-9f2c"), false);
 });

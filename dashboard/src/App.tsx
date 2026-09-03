@@ -14,6 +14,7 @@ import type {
   CollectionProvenance,
   EnforcementStatus,
 } from "./challenge";
+import { isScheduledVerification } from "./challenge";
 import { ProtectionBanner } from "./components/ProtectionBanner";
 import { dashboardConfig } from "./config";
 import { useDashboard } from "./hooks/useDashboard";
@@ -250,12 +251,22 @@ export function App() {
       </header>
       <ProtectionBanner state={state} />
       {enforcement?.pending_challenge ? (
-        <p className="challenge-notice" role="status">
-          Identity verification in progress ·{" "}
-          {enforcement.pending_challenge.action} · answer the prompt on this
-          desktop. This console only reports it; the prompt is the enforcement
-          path.
-        </p>
+        isScheduledVerification(enforcement.pending_challenge.decision_id) ? (
+          <p
+            className="challenge-notice challenge-notice--scheduled"
+            role="status"
+          >
+            <strong>Routine verification</strong> · A periodic check that
+            confirms it is you. Nothing is wrong.
+          </p>
+        ) : (
+          <p className="challenge-notice" role="status">
+            Identity verification in progress ·{" "}
+            {enforcement.pending_challenge.action} · answer the prompt on this
+            desktop. This console only reports it; the prompt is the
+            enforcement path.
+          </p>
+        )
       ) : null}
       <div className="workspace">
         <nav aria-label="Dashboard views">

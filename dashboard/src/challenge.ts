@@ -51,6 +51,18 @@ export type CollectionProvenance = {
   readonly config_version: string;
 };
 
+const SCHEDULED_PREFIX = "scheduled-anchor:";
+
+/**
+ * A scheduled A3 verification prompt arrives through the same challenge
+ * status surface as an enforcement challenge, but it is routine, not a risk
+ * response. The dashboard says so, so a participant is not alarmed by a
+ * periodic prompt during a multi-day study.
+ */
+export function isScheduledVerification(decisionId: string): boolean {
+  return decisionId.startsWith(SCHEDULED_PREFIX);
+}
+
 export interface ChallengeSetupInput {
   readonly question: string;
   readonly answer: string;
