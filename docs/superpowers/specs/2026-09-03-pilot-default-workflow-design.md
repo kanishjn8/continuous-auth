@@ -307,20 +307,56 @@ because the backend already loads `UpdateSettings` and does not load collection 
 used by collection tooling, and a test asserts the two express the same interval so they
 cannot drift apart again.
 
-Both are set to **8 hours** (`28800` seconds; `8.0` hours) in the new pilot configs. This
-is an engineering placeholder in the same sense as every other value in `config/`, not an
-approved protocol parameter, and requires human sign-off before collection. Rationale for
-the proposed value: PLAN.md Section 12.2 describes A3 as "a deliberate low-frequency
-prompt" whose burden is "small, predictable, infrequent"; eight hours yields roughly one
-to two prompts per working day, which is enough to anchor most segments while remaining
-defensible to participants. The existing 4-hour value is more burdensome than Section
-12.2 describes, and 24 hours would anchor too few segments to support the E1 experiment.
+**The cadence stays at the repository's existing 4 hours** (`14400` seconds; `4.0` hours),
+and `collection.pilot.yaml` is set to match. No new parameter is introduced.
+
+The value follows from how often an anchor can actually be created. ADR-007 splits a
+segment after 15 minutes of zero input (`idle_split_seconds: 900`), so an ordinary working
+day produces roughly 5-15 segments, and an A3 anchor attaches to exactly one of them: the
+anchor lookup in `_submit_segment_candidate` matches `segment_id`, allowing the `NULL`
+(A1) case only for a session's first segment. Assuming one session and about eight running
+hours per day:
+
+| Cadence | Prompts per day | Across a 5-day round | Anchored segments per day |
+| --- | --- | --- | --- |
+| 4 h | 1-2 | 5-10 | ~2-3 of 5-15 |
+| 8 h | 0-1 | 0-3, plausibly 0 | ~1-2 of 5-15 |
+| 24 h | 0 | 0 | 1 (A1 only) |
+
+Twenty-four hours does not produce few anchors; it produces none, because no session lasts
+that long. Eight hours is close to degenerate for the same reason: the prompt falls due at
+the edge of a standard workday, so on any day ending at or before eight hours it never
+fires, and whatever anchors it does produce cluster at close of business. That clustering
+is the strongest argument against a cadence near session length: it does not touch
+AGENTS.md constraint 4, because the cadence never reaches `ml/features/`, but it would bias
+*which* segments become training-eligible toward one part of the day.
+
+What PLAN.md Section 12.2 actually requires is narrower than a specific number. It says A3
+is "a deliberate low-frequency prompt (e.g. once per N hours)" carrying "a small,
+predictable, infrequent user-experience burden," whose purpose is to "create verification
+anchors for otherwise uneventful sessions." `N` is a literal placeholder. Section 12.2
+imposes two tests only: the burden must be small and predictable, and the mechanism must
+actually produce anchors. Four hours costs one to two prompts per day, comparable to a
+routine re-authentication prompt, and is the only one of the three candidate values that
+satisfies the second test.
+
+A3 density is a data-richness decision, not a hard requirement of either required
+experiment. E2 needs nothing from A3: it injects labelled impostor segments and verifies
+the gate rejects them, and an unanchored injected segment fails G2, which is the gate
+working correctly. E1 does not need A3 to run either, since it replays the update manager
+offline over whatever anchors the corpus recorded; sparse anchors make its updated arm
+thin rather than impossible. The cadence therefore affects the strength of E1 and the
+amount of real evidence behind the G2 path, not whether the pipeline functions.
 
 **Components:**
 
-1. `backend/app/updates/anchors.py`: a scheduler holding the last successful anchor time
-   per active session and deciding when a prompt is due, using the configured interval.
-   It emits a prompt request; it never fabricates an anchor.
+1. `backend/app/updates/anchors.py`: a scheduler deciding when a prompt is due from the
+   configured interval. **The clock is reset by a successful A3 only, never by A1 or A2.**
+   A1 anchors a session's first segment and nothing else, so allowing it to suppress the
+   next A3 would remove prompts precisely where A3 is the only mechanism that can anchor a
+   segment; it would also make the effective cadence depend on session length and render a
+   24-hour setting structurally inert. The scheduler emits a prompt request and never
+   fabricates an anchor.
 2. Runtime integration in `RuntimeOrchestrator`: check due-ness on the existing
    heartbeat path, dispatch through the existing `ChallengeService` so the participant
    answers the security challenge they configured, and on a correct answer call
@@ -336,6 +372,13 @@ defensible to participants. The existing 4-hour value is more burdensome than Se
 A wrong or expired answer records the failed outcome and creates no anchor, matching the
 existing A2 behaviour. Continuous low risk is never an anchor.
 
+**The automated scheduler is the sole A3 path.** `docs/pilot/operator-checklist.md`
+currently says "Record completed A3 prompts only after an independent successful
+verification," which describes a human-recorded A3 — a different mechanism with a separate
+audit trail and a dependency on operator discipline across a remote five-day round. That
+line is updated to describe *reviewing* automated anchors rather than recording them, so
+one mechanism produces every A3 record and E1 cannot conflate two provenances of evidence.
+
 ### 7.2 `config/collection.pilot.yaml`
 
 New file. `config/collection.development.yaml` is left untouched.
@@ -349,7 +392,7 @@ collection:
   min_windows_per_day: 50
   min_full_modality_fraction: 0.40
   max_observed_gap_hours: 24.0
-  scheduled_anchor_interval_hours: 8.0
+  scheduled_anchor_interval_hours: 4.0
   eligible_provenance: [PILOT]
 
 freeze:
@@ -367,12 +410,41 @@ this round to pilot participants; the development file keeps `[TEAM, PILOT]`. Th
 remaining values are unchanged placeholders carried over for human review, and
 `config_version` says so.
 
-### 7.3 `config/updates.pilot.yaml`
+### 7.3 No `config/updates.pilot.yaml`, and the `development_only` contract
 
-New file, mirroring the storage-profile pattern so `updates.development.yaml` is not
-edited. Identical to the development file except `scheduled_anchor_interval_seconds:
-28800`. `quarantine_days` and `retraining_cadence_days` remain `7`, per Section 6.3.
-`backend/app/runtime/cli.py` defaults `--updates-config` to this file.
+An earlier draft proposed a pilot variant of the update config. It is not created, for two
+reasons.
+
+First, it would be byte-identical to `config/updates.development.yaml`: the cadence stays
+at 4 hours (Section 7.1) and `quarantine_days` and `retraining_cadence_days` stay at 7
+(Section 6.3), so nothing would differ.
+
+Second, and more importantly, it **could not be loaded**. Six runtime config loaders —
+`backend/app/api/config.py`, `risk/config.py`, `risk/context_config.py`,
+`runtime/config.py`, `updates/config.py`, and `decisions/config.py` — declare
+`development_only: Literal[True]`, so a config file that does not assert it is
+development-only fails Pydantic validation outright. A `config/updates.pilot.yaml` would
+have to declare itself development-only, which is self-contradictory, or the loader
+constraint would have to be relaxed.
+
+**This is the largest remaining place where the project assumes normal operation is
+development-only.** A pilot run today loads six configuration files that each declare
+`development_only: true`, covering API, risk, context confidence, orchestration, updates,
+and enforcement. Only storage and collection escape it: `StorageRuntimeConfig` and
+`tools/collection/config.py` have no such field, which is exactly why
+`config/storage.pilot.yaml` and `config/collection.pilot.yaml` are possible at all.
+
+This specification deliberately does **not** relax those six loaders. Doing so would
+weaken a validation constraint to make the pipeline read better, which is the pattern this
+work forbids, and the values in those files genuinely are unreviewed engineering
+placeholders — the label is currently accurate. Producing reviewed pilot variants across
+all six domains is a separate, larger change requiring its own human review of every value
+in each file, and it is recorded here as a known limitation rather than silently resolved.
+
+Consequence for the implementation plan: `backend/app/runtime/cli.py` keeps defaulting
+`--updates-config` to `config/updates.development.yaml`, and the pilot documentation states
+plainly that the runtime tunables remain unreviewed development placeholders while the
+*data* is real PILOT data governed by reviewed storage and collection profiles.
 
 ### 7.4 Provenance mislabelling in the session entry anchor
 
@@ -400,7 +472,8 @@ dashboard header. No new configuration and no participant data is involved.
 | `startup.md` | Lines describing disposable synthetic state, synthetic-only supplied configuration, the `--synthetic-user` invocation, and the synthetic session narrative |
 | `docs/architecture.md` | "Development launchers accept synthetic provenance only" no longer describes the default launcher |
 | `docs/demo.md` | "Start the packaged synthetic runtime" |
-| `docs/pilot/README.md` | Point the health and freeze examples at `config/collection.pilot.yaml` |
+| `docs/pilot/README.md` | Point the health and freeze examples at `config/collection.pilot.yaml`; state that runtime tunables remain unreviewed development placeholders (Section 7.3) |
+| `docs/pilot/operator-checklist.md` | Rewrite the manual "Record completed A3 prompts" line as review of automated anchors (Section 7.1) |
 | `backend/app/runtime/application.py`, `backend/app/runtime/cli.py` | Module docstrings still say "synthetic-development" |
 | `guide.md` | Replace the "Note for Manas: the promotion gate" section with the resolved workflow once ADR-013 is approved |
 
@@ -510,8 +583,9 @@ the successful path, and using synthetic fixtures only.
 | Promotion gate | Existing `ml/tests` assertions unchanged, proving the update gate is not weakened |
 | Guardrails | G07 fails when either boundary name is removed from `ml/training/common.py` |
 | A3 anchors | A due prompt dispatches; a correct answer records exactly one `A3_SCHEDULED_PROMPT`; a wrong or expired answer records no anchor; the runtime and collection cadence values agree |
+| A3 clock | An A1 session entry does **not** postpone the next scheduled prompt; an A2 challenge response does not either; only a successful A3 resets the clock |
 | Corpus loader | A tampered manifest raises; post-freeze windows are excluded; partitions stay day-disjoint |
-| Configs | `collection.pilot.yaml` and `updates.pilot.yaml` validate; five days partition into three non-empty splits; `quarantine_days` and `retraining_cadence_days` are still 7 |
+| Configs | `collection.pilot.yaml` validates; five days partition into three non-empty splits; `quarantine_days` and `retraining_cadence_days` are still 7 |
 | Provenance | Existing `test_provenance_flow.py`, extended to cover the entry-anchor evidence reference no longer containing "synthetic" |
 | Quarantine timing | A segment completed on day D is not eligible before D+7 and is eligible at D+7 |
 
@@ -521,6 +595,8 @@ the successful path, and using synthetic fixtures only.
 
 - `config/storage.development.yaml`, `config/collection.development.yaml`,
   `config/updates.development.yaml`, `config/synthetic.development.yaml`.
+- The `development_only: Literal[True]` constraint in all six runtime config loaders
+  (Section 7.3). It is recorded as a known limitation, not relaxed.
 - `tools/synthetic/` and `tools/demo/`.
 - `ml/training/gate.py::require_promotion_gate` — not one line.
 - G1 through G6 semantics, `quarantine_days`, `retraining_cadence_days`,
@@ -533,8 +609,9 @@ the successful path, and using synthetic fixtures only.
 1. **ADR-013 and the PLAN.md amendments (Sections 5.3 and 12.1 cross-references) require
    explicit human approval before any code in Section 5 or Section 8 merges.** AGENTS.md
    constraint 11.
-2. **The 8-hour A3 cadence requires human sign-off before collection**, as an operational
-   parameter affecting participants.
+2. **The A3 cadence stays at the repository's existing 4 hours and introduces no new
+   parameter.** It still warrants a sanity check before collection as an operational
+   parameter affecting participants: one to two prompts per participant per working day.
 3. **`config/collection.pilot.yaml` values other than `target_collection_days` are
    inherited placeholders** and should be reviewed against the approved pilot protocol
    before day 1.
