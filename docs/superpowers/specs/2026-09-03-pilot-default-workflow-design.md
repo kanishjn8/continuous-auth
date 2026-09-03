@@ -1,7 +1,7 @@
 # PILOT as the Default End-to-End Workflow — Design Specification
 
 **Date:** 2026-09-03
-**Status:** Proposed. Awaiting human review.
+**Status:** Approved 2026-09-03, including ADR-013 (Section 5.4). Implementation plan authorised.
 **Scope:** Make `PILOT` the default provenance for normal data-collection runs and
 complete the PILOT lifecycle through evaluation, training, promotion, and deployment.
 
@@ -37,7 +37,8 @@ Every change in this document is bound by `AGENTS.md`:
 8. No participant data, credential, database, audit log, or model artifact is committed.
 9. No model loads across a feature-schema version mismatch.
 11. No ADR is changed and no `[OPEN]` item is closed without explicit human approval.
-    Section 5.4 drafts ADR-013 for approval; drafting it does not approve it.
+    ADR-013 (Section 5.4) received that approval on 2026-09-03. No other ADR is touched
+    and no `[OPEN]` item is closed by this work.
 
 Additionally, per the review that produced this specification: existing synthetic data
 and synthetic/development functionality are not deleted, invalidated, or modified.
@@ -200,15 +201,15 @@ enrollment mode. The caller must name the route it is using.
 keyword. All parameters are additive with defaults, so existing callers and public
 signatures continue to work.
 
-### 5.4 ADR-013 (draft, requires human approval)
+### 5.4 ADR-013 (approved 2026-09-03)
 
-To be added to PLAN.md Section 6 and cross-referenced from Sections 5.3 and 12.1. This
-text is a proposal. It is not approved by its appearance here, and no code depending on
-it may merge before a human approves it.
+Approved by the project owner on 2026-09-03. To be added to PLAN.md Section 6 and
+cross-referenced from Sections 5.3 and 12.1, in the same change as the enrollment gate it
+authorises.
 
 > **ADR-013 — Enrollment Admission Is Distinct From Update Promotion**
 >
-> **Status:** Proposed.
+> **Status:** Accepted, 2026-09-03.
 >
 > **Context.** The Model Update Manager promotion gate (Section 12.1) admits new data
 > into the training set of a profile that already exists. Gate G3 counts scored windows,
@@ -606,9 +607,9 @@ the successful path, and using synthetic fixtures only.
 
 ## 12. Approval gates
 
-1. **ADR-013 and the PLAN.md amendments (Sections 5.3 and 12.1 cross-references) require
-   explicit human approval before any code in Section 5 or Section 8 merges.** AGENTS.md
-   constraint 11.
+1. **ADR-013: satisfied.** Approved by the project owner on 2026-09-03, unblocking Sections
+   5 and 8. The PLAN.md Section 6 insertion and the Section 5.3 / 12.1 cross-references
+   ship in the same change as the enrollment gate. AGENTS.md constraint 11.
 2. **The A3 cadence stays at the repository's existing 4 hours and introduces no new
    parameter.** It still warrants a sanity check before collection as an operational
    parameter affecting participants: one to two prompts per participant per working day.
