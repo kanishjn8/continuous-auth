@@ -1,4 +1,9 @@
 import type {
+  ChallengeStatus,
+  CollectionProvenance,
+  EnforcementStatus,
+} from "../challenge";
+import type {
   AlertRecord,
   ApiError,
   CurrentState,
@@ -82,5 +87,39 @@ export async function acknowledgeAlert(alertId: string): Promise<void> {
 export async function rollbackProfile(userId: string): Promise<void> {
   await request(`/v1/admin/models/${encodeURIComponent(userId)}/rollback`, {
     method: "POST",
+  });
+}
+
+export async function loadChallengeStatus(): Promise<ChallengeStatus> {
+  return request<ChallengeStatus>("/v1/enforcement/challenge");
+}
+
+export async function loadEnforcementStatus(): Promise<EnforcementStatus> {
+  return request<EnforcementStatus>("/v1/enforcement/status");
+}
+
+export async function loadCollectionProvenance(): Promise<CollectionProvenance> {
+  return request<CollectionProvenance>("/v1/collection/provenance");
+}
+
+/**
+ * Save the first challenge, or rotate an existing one by supplying the
+ * current answer. Answers travel in the request body only; nothing here ever
+ * puts one in a URL, where it would reach server and proxy logs.
+ */
+export async function saveChallenge(input: {
+  readonly question: string;
+  readonly answer: string;
+  readonly confirmAnswer: string;
+  readonly currentAnswer?: string;
+}): Promise<void> {
+  await request("/v1/enforcement/challenge", {
+    method: "PUT",
+    body: JSON.stringify({
+      question: input.question,
+      answer: input.answer,
+      confirm_answer: input.confirmAnswer,
+      current_answer: input.currentAnswer ?? null,
+    }),
   });
 }

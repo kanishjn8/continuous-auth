@@ -1,19 +1,41 @@
-import { FormEvent, useCallback, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
-import { acknowledgeAlert, login, logout, rollbackProfile } from "./api/client";
+import {
+  acknowledgeAlert,
+  loadChallengeStatus,
+  loadCollectionProvenance,
+  loadEnforcementStatus,
+  login,
+  logout,
+  rollbackProfile,
+} from "./api/client";
+import type {
+  ChallengeStatus,
+  CollectionProvenance,
+  EnforcementStatus,
+} from "./challenge";
 import { ProtectionBanner } from "./components/ProtectionBanner";
 import { dashboardConfig } from "./config";
 import { useDashboard } from "./hooks/useDashboard";
 import type { RiskDecision, WebSocketEnvelope } from "./protocol";
 import type { DashboardAction } from "./state/dashboard";
 import { AlertsView } from "./views/AlertsView";
+import { ChallengeSetupView } from "./views/ChallengeSetupView";
 import { HealthView } from "./views/HealthView";
 import { HistoryView } from "./views/HistoryView";
 import { LiveView } from "./views/LiveView";
 import { OverviewView } from "./views/OverviewView";
 import { ProfilesView } from "./views/ProfilesView";
+import { SettingsView } from "./views/SettingsView";
 
-type View = "overview" | "live" | "alerts" | "history" | "health" | "profiles";
+type View =
+  | "overview"
+  | "live"
+  | "alerts"
+  | "history"
+  | "health"
+  | "profiles"
+  | "settings";
 
 const views: readonly { readonly id: View; readonly label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -22,6 +44,7 @@ const views: readonly { readonly id: View; readonly label: string }[] = [
   { id: "history", label: "History" },
   { id: "health", label: "System health" },
   { id: "profiles", label: "Profiles" },
+  { id: "settings", label: "Settings" },
 ];
 
 function replayTrace(dispatch: React.Dispatch<DashboardAction>): () => void {
@@ -126,14 +149,43 @@ export function App() {
   const [authenticated, setAuthenticated] = useState(true);
   const [view, setView] = useState<View>("overview");
   const [replay, setReplay] = useState(false);
+  const [challenge, setChallenge] = useState<ChallengeStatus | null>(null);
+  const [enforcement, setEnforcement] = useState<EnforcementStatus | null>(null);
+  const [provenance, setProvenance] = useState<CollectionProvenance | null>(
+    null,
+  );
   const stopReplay = useRef<(() => void) | null>(null);
   const onUnauthorized = useCallback(() => setAuthenticated(false), []);
   const { state, dispatch } = useDashboard(
     authenticated && !replay,
     onUnauthorized,
   );
+
+  const refreshChallenge = useCallback(async () => {
+    try {
+      const [status, enforcementStatus, provenanceStatus] = await Promise.all([
+        loadChallengeStatus(),
+        loadEnforcementStatus(),
+        loadCollectionProvenance(),
+      ]);
+      setChallenge(status);
+      setEnforcement(enforcementStatus);
+      setProvenance(provenanceStatus);
+    } catch {
+      // A challenge surface that cannot be read must not blank the console;
+      // the setup gate below stays closed until a status actually arrives.
+      setChallenge(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (authenticated) void refreshChallenge();
+  }, [authenticated, refreshChallenge]);
+
   if (!authenticated)
     return <LoginView onAuthenticated={() => setAuthenticated(true)} />;
+  if (challenge !== null && !challenge.configured && !replay)
+    return <ChallengeSetupView onConfigured={() => void refreshChallenge()} />;
   async function signOut() {
     try {
       await logout();
@@ -174,6 +226,17 @@ export function App() {
           </div>
         </div>
         <div className="header-actions">
+          {provenance && (
+            <span
+              className={
+                provenance.collection_provenance === "PILOT"
+                  ? "provenance-badge provenance-badge--pilot"
+                  : "provenance-badge provenance-badge--synthetic"
+              }
+            >
+              Recording: {provenance.collection_provenance}
+            </span>
+          )}
           <button
             className={replay ? "active" : "secondary"}
             onClick={toggleReplay}
@@ -186,6 +249,14 @@ export function App() {
         </div>
       </header>
       <ProtectionBanner state={state} />
+      {enforcement?.pending_challenge ? (
+        <p className="challenge-notice" role="status">
+          Identity verification in progress ·{" "}
+          {enforcement.pending_challenge.action} · answer the prompt on this
+          desktop. This console only reports it; the prompt is the enforcement
+          path.
+        </p>
+      ) : null}
       <div className="workspace">
         <nav aria-label="Dashboard views">
           {views.map((item) => (
@@ -208,6 +279,13 @@ export function App() {
           {view === "health" ? <HealthView state={state} /> : null}
           {view === "profiles" ? (
             <ProfilesView state={state} onRollback={rollback} />
+          ) : null}
+          {view === "settings" ? (
+            <SettingsView
+              challenge={challenge}
+              enforcement={enforcement}
+              onChanged={() => void refreshChallenge()}
+            />
           ) : null}
         </main>
       </div>
