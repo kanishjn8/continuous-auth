@@ -340,7 +340,18 @@ class SQLiteApiBackend:
         except ChallengeError as exc:
             raise ResourceConflict(str(exc)) from exc
         accepted = result.outcome is ResponseOutcome.ACCEPTED
-        if self.enforcement is not None:
+        is_scheduled_anchor = result.challenge.decision_id.startswith("scheduled-anchor:")
+        if self.enforcement is not None and not is_scheduled_anchor:
+            # A scheduled-anchor decision_id is minted in memory by
+            # ChallengeService.open_scheduled and is never inserted into the
+            # `decisions` table (it is not a RiskDecision), so routing it
+            # through EnforcementCoordinator.record_challenge_response would
+            # hit an UPDATE ... WHERE decision_id = ? that matches zero rows
+            # and raises StorageUnavailableError -- turning every correctly
+            # answered A3 prompt into a 500 with no anchor stored. A
+            # scheduled prompt is always SOFT_CHALLENGE and never produces an
+            # A2 anchor, so this call has nothing to do for that path anyway;
+            # the scheduled_anchor_sink below is what records A3.
             self.enforcement.record_challenge_response(
                 decision_id=result.challenge.decision_id,
                 requested_action=result.challenge.action,
@@ -353,7 +364,7 @@ class SQLiteApiBackend:
             )
         if (
             result.outcome is ResponseOutcome.ACCEPTED
-            and result.challenge.decision_id.startswith("scheduled-anchor:")
+            and is_scheduled_anchor
             and self._scheduled_anchor_sink is not None
             and result.evidence_reference is not None
         ):

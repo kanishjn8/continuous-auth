@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -7,13 +8,15 @@ from fastapi.testclient import TestClient
 
 from backend.app.api.backend import SQLiteApiBackend
 from backend.app.decisions.adapters import EnforcementCoordinator
-from backend.app.decisions.challenge import ChallengeService
+from backend.app.decisions.challenge import ChallengeService, Clock
 from backend.app.decisions.config import EnforcementSettings
 from backend.app.main import create_runtime_app
 from backend.app.storage.audit import AuditLog
 from backend.app.storage.config import StorageSettings
 from backend.app.storage.database import SQLiteDatabase
 from backend.app.storage.service import StorageService
+from backend.tests.test_scheduled_anchors import ANSWER as ORCHESTRATOR_ANSWER
+from backend.tests.test_scheduled_anchors import _orchestrator as build_orchestrator
 from protocol.generated.python.contracts import (
     DecisionAction,
     RetentionConfig,
@@ -93,11 +96,15 @@ def _storage(tmp_path: Path) -> StorageService:
     return StorageService(settings, database, AuditLog(audit_directory), None)
 
 
-@pytest.fixture
-def api_backend_with_sink(
-    tmp_path: Path,
+def _backend_with_sink(
+    tmp_path: Path, *, clock: Clock | None = None
 ) -> tuple[SQLiteApiBackend, ChallengeService, list[dict[str, str]]]:
-    """Build SQLiteApiBackend with a recording scheduled-anchor sink."""
+    """Build SQLiteApiBackend with a recording scheduled-anchor sink.
+
+    Backed by ``_MemoryEnforcementStore``, not the real StorageService --
+    see that class's docstring for why. The production-wiring regression
+    test below builds its own backend against the real store instead.
+    """
 
     storage = _storage(tmp_path)
     settings = EnforcementSettings(
@@ -108,7 +115,7 @@ def api_backend_with_sink(
         challenge_timeout_seconds=120.0,
         answer_hash_iterations=100_000,
     )
-    service = ChallengeService(storage, settings)
+    service = ChallengeService(storage, settings, clock=clock)
     service.configure(
         question=QUESTION, answer=SCHEDULED_ANSWER, confirm_answer=SCHEDULED_ANSWER
     )
@@ -128,6 +135,15 @@ def api_backend_with_sink(
         scheduled_anchor_sink=sink,
     )
     return backend, service, recorded
+
+
+@pytest.fixture
+def api_backend_with_sink(
+    tmp_path: Path,
+) -> tuple[SQLiteApiBackend, ChallengeService, list[dict[str, str]]]:
+    """Build SQLiteApiBackend with a recording scheduled-anchor sink."""
+
+    return _backend_with_sink(tmp_path)
 
 
 @pytest.fixture
@@ -310,3 +326,82 @@ def test_ordinary_challenge_response_does_not_use_the_scheduled_sink(
         response_token=pending.response_token,
     )
     assert recorded == []
+
+
+def test_expired_scheduled_response_records_no_anchor(tmp_path: Path) -> None:
+    """An expired scheduled challenge must never become a verification anchor."""
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    moment = {"value": now}
+    backend, service, recorded = _backend_with_sink(tmp_path, clock=lambda: moment["value"])
+    pending = service.open_scheduled(
+        user_id="participant-01", session_id="s1", segment_id="seg1"
+    )
+    moment["value"] = now + timedelta(seconds=121)
+    outcome = backend.respond_to_challenge(
+        decision_id=pending.decision_id,
+        answer=SCHEDULED_ANSWER,
+        response_token=pending.response_token,
+    )
+    assert outcome == "EXPIRED"
+    assert recorded == []
+
+
+def test_correct_scheduled_response_stores_an_a3_anchor_with_the_real_store(
+    tmp_path: Path,
+) -> None:
+    """Regression: respond_to_challenge must not lose the A3 anchor in production.
+
+    In production, ``enforcement`` is the orchestrator's
+    ``EnforcementCoordinator``, backed by the real ``StorageService`` (see
+    ``backend/app/runtime/orchestrator.py``), not the in-memory stand-in the
+    other tests in this file use. Before the fix, ``respond_to_challenge``
+    called ``enforcement.record_challenge_response`` unconditionally for
+    every response. That method's ``_record`` path calls
+    ``store.record_action_outcome``, which runs
+    ``UPDATE decisions ... WHERE decision_id = ?``. A
+    ``scheduled-anchor:<token>`` id is minted in memory by
+    ``ChallengeService.open_scheduled`` and is never inserted into the
+    `decisions` table, so that UPDATE always matched zero rows and raised
+    ``StorageUnavailableError`` -- every correctly answered A3 prompt 500'd
+    and no anchor was ever stored. This test builds the real production
+    wiring (via the same ``_orchestrator`` helper used in
+    test_scheduled_anchors.py) and asserts the response succeeds and stores
+    exactly one A3_SCHEDULED_PROMPT row.
+    """
+
+    orchestrator = build_orchestrator(tmp_path)
+    lifecycle, _ = orchestrator.start_authenticated_session(
+        user_id="participant-01",
+        evidence_reference="entry-proof",
+        session_id="session-1",
+    )
+    session_id = lifecycle.session_id
+    assert session_id is not None
+    orchestrator.storage.create_segment("segment-1", session_id, 0, "SESSION_START")
+
+    assert orchestrator.challenge_service is not None
+    backend = SQLiteApiBackend(
+        orchestrator.storage,
+        active_user_provider=lambda: "participant-01",
+        challenge_service=orchestrator.challenge_service,
+        enforcement=orchestrator.enforcement,
+        enforcement_settings=None,
+        scheduled_anchor_sink=orchestrator.complete_scheduled_anchor,
+    )
+    pending = orchestrator.challenge_service.open_scheduled(
+        user_id="participant-01", session_id=session_id, segment_id="segment-1"
+    )
+
+    outcome = backend.respond_to_challenge(
+        decision_id=pending.decision_id,
+        answer=ORCHESTRATOR_ANSWER,
+        response_token=pending.response_token,
+    )
+    assert outcome == "ACCEPTED"
+
+    with orchestrator.storage.database.connection() as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM verification_anchors WHERE anchor_type = 'A3_SCHEDULED_PROMPT'"
+        ).fetchone()[0]
+    assert count == 1
