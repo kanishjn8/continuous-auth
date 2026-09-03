@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as datetime_module
 from pathlib import Path
 
 from datetime import UTC, datetime, timedelta
@@ -14,6 +15,7 @@ from backend.app.decisions.config import EnforcementSettings
 from backend.app.ingestion import IngestionSettings
 from backend.app.risk import load_context_config, load_risk_settings
 from backend.app.runtime import RuntimeOrchestrator
+from backend.app.runtime import orchestrator as orchestrator_module
 from backend.app.storage.audit import AuditLog
 from backend.app.storage.config import StorageSettings
 from backend.app.storage.database import SQLiteDatabase
@@ -274,3 +276,51 @@ def test_complete_scheduled_anchor_records_and_resets_the_clock(tmp_path: Path) 
             "SELECT COUNT(*) FROM verification_anchors WHERE anchor_type = 'A3_SCHEDULED_PROMPT'"
         ).fetchone()[0]
     assert count == 1
+
+
+def test_check_heartbeat_triggers_the_scheduled_anchor_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: check_heartbeat must actually call check_scheduled_anchor.
+
+    check_scheduled_anchor is fully covered by direct-call tests above, but
+    none of them prove the heartbeat path wires into it. A3 is the only
+    mechanism that anchors an otherwise uneventful session, and real
+    collection cannot be redone after the fact, so the one line in
+    check_heartbeat that dispatches this check needs its own regression
+    test: this test must fail if that line is ever deleted.
+    """
+
+    orchestrator = _orchestrator(tmp_path)
+    lifecycle, _ = orchestrator.start_authenticated_session(
+        user_id="participant-1",
+        evidence_reference="entry-proof",
+        authenticated_at=START,
+        session_id="session-1",
+    )
+    session_id = lifecycle.session_id
+    assert session_id is not None
+    orchestrator.storage.create_segment("segment-1", session_id, 0, "SESSION_START")
+    orchestrator._builders["segment-1"] = object()  # type: ignore[assignment]
+
+    due_at = START + timedelta(hours=4)
+
+    class _FixedDatetime(datetime_module.datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return due_at
+
+    monkeypatch.setattr(orchestrator_module, "datetime", _FixedDatetime)
+
+    assert orchestrator.challenge_service is not None
+    assert orchestrator.challenge_service.pending() == ()
+
+    # No heartbeat has arrived yet, so check_heartbeat takes its healthy
+    # (age is None) early-return path -- exactly the path the scheduled
+    # anchor check is dispatched from.
+    orchestrator.check_heartbeat()
+
+    pending = orchestrator.challenge_service.pending()
+    assert len(pending) == 1
+    assert pending[0].session_id == session_id
+    assert pending[0].segment_id == "segment-1"
