@@ -362,6 +362,22 @@ amount of real evidence behind the G2 path, not whether the pipeline functions.
    heartbeat path, dispatch through the existing `ChallengeService` so the participant
    answers the security challenge they configured, and on a correct answer call
    `record_scheduled_verification` with the current session and segment.
+
+   **A3 must not route through `EnforcementCoordinator`.** `config/enforcement.development.yaml`
+   sets `enabled: false` and states it "must stay false during ordinary collection", because
+   real enforcement locks the workstation and a false positive would both disrupt the
+   participant and contaminate the corpus. `NativeChallengeAdapter.execute` returns
+   `SKIPPED / ENFORCEMENT_DISABLED` whenever `prompt_enabled` is false, so an A3 dispatched
+   down the enforcement path would produce no prompt at all for the entire pilot.
+
+   A3 therefore registers directly on `ChallengeService` through a new
+   `open_scheduled(user_id, session_id, segment_id)` method, which mirrors `open()` but
+   takes no `RiskDecision` — a scheduled verification is not a risk decision and must not
+   fabricate one. The dashboard surfaces the pending challenge regardless of `enabled`,
+   which is the primary answer path during collection; the native prompt is additionally
+   spawned only when `prompt_enabled` is true. Verification evidence is unaffected: a
+   correct answer yields an anchor either way, and enforcement policy never gates the
+   creation of research evidence.
 3. API: extend the existing `/v1/enforcement/challenge` surface rather than adding a
    parallel one. The scheduled prompt reuses the configured challenge credential and the
    existing response endpoint, so no new credential path and no new secret storage is
