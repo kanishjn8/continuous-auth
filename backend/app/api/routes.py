@@ -9,7 +9,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import timedelta
 
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
@@ -57,6 +57,23 @@ class _ShadowModeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool
+
+
+class _ChallengeSetupRequest(BaseModel):
+    """First-run setup, or a rotation that re-states the current answer."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    question: str
+    answer: str
+    confirm_answer: str
+    current_answer: str | None = None
+
+
+class _ChallengeResponseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    answer: str
 
 
 def _correlation(request: Request) -> str:
@@ -391,16 +408,92 @@ def create_api_app(
             accepted=True, code="MODEL_PROFILE_ROLLED_BACK", correlation_id=_correlation(request)
         )
 
+    @app.get("/v1/enforcement/challenge")
+    def challenge_status(
+        identity: SessionIdentity = Depends(require_session),
+    ) -> dict[str, object]:
+        """Report whether first-run setup is complete, and the question only.
+
+        The answer never leaves the process in any form.
+        """
+
+        del identity
+        return backend.challenge_status()
+
+    @app.put("/v1/enforcement/challenge")
+    def configure_challenge(
+        body: _ChallengeSetupRequest,
+        request: Request,
+        identity: SessionIdentity = Depends(require_session),
+    ) -> dict[str, object]:
+        del identity
+        backend.configure_challenge(
+            question=body.question,
+            answer=body.answer,
+            confirm_answer=body.confirm_answer,
+            current_answer=body.current_answer,
+        )
+        return {"configured": True, "correlation_id": _correlation(request)}
+
+    @app.post("/v1/enforcement/challenge/{decision_id}/respond")
+    def respond_to_challenge(
+        decision_id: str,
+        body: _ChallengeResponseRequest,
+        request: Request,
+        ca_session: str | None = Cookie(default=None),
+        x_challenge_token: str | None = Header(default=None),
+    ) -> dict[str, object]:
+        """Resolve a dispatched challenge.
+
+        Two callers are legitimate: the native prompt, which holds the
+        one-time token for this decision, and an authenticated dashboard
+        session. The prompt has no session cookie, so the token is the only
+        credential it can present.
+        """
+
+        if x_challenge_token is None and auth.authenticate(ca_session) is None:
+            raise HTTPException(status_code=401, detail="authentication required")
+        outcome = backend.respond_to_challenge(
+            decision_id=decision_id,
+            answer=body.answer,
+            response_token=x_challenge_token,
+        )
+        return {"outcome": outcome, "correlation_id": _correlation(request)}
+
+    @app.get("/v1/enforcement/status")
+    def enforcement_status(
+        identity: SessionIdentity = Depends(require_session),
+    ) -> dict[str, object]:
+        del identity
+        return backend.enforcement_status()
+
+    @app.get("/v1/collection/provenance")
+    def collection_provenance(
+        identity: SessionIdentity = Depends(require_session),
+    ) -> dict[str, str]:
+        del identity
+        return backend.collection_provenance()
+
     @app.get("/healthz", include_in_schema=False)
     def healthz() -> dict[str, str]:
         return {"status": "alive", "protocol_version": settings.protocol_version}
 
     from fastapi import WebSocket, WebSocketDisconnect
 
-    @app.websocket("/v1/stream")
-    async def stream(websocket: WebSocket, cursor: int | None = None) -> None:
+    # Registered via app.router.add_websocket_route (below) rather than the
+    # @app.websocket decorator: with `from __future__ import annotations` active
+    # in this module, FastAPI's websocket dependant-builder fails to recognize
+    # the `websocket: WebSocket` parameter as the special connection object and
+    # instead treats it as a required query field, rejecting every connection
+    # before it reaches this function. Starlette's plain route registration
+    # calls this coroutine directly with no dependant/query-injection step, so
+    # `cursor` is parsed from the query string manually below.
+    async def stream(websocket: WebSocket) -> None:
+        cursor_param = websocket.query_params.get("cursor")
+        cursor = int(cursor_param) if cursor_param is not None else None
         token = websocket.cookies.get(COOKIE_NAME)
         if auth.authenticate(token) is None:
+            await websocket.accept()
             await websocket.close(code=4401)
             return
         subscription = await broker.subscribe(cursor)
@@ -418,5 +511,7 @@ def create_api_app(
             return
         finally:
             await broker.unsubscribe(subscription.client_id)
+
+    app.router.add_websocket_route("/v1/stream", stream, name="stream")
 
     return app

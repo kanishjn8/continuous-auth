@@ -160,6 +160,9 @@ def test_configuration_schema_enforces_security_boundaries_without_defaults() ->
             "confidence_floor": 0.1,
             "min_empirical_observations": 1,
             "bootstrap_weights": {"UNKNOWN": 1.0},
+            "adjustment_mode": "PER_CONTEXT_NORMALIZATION",
+            "variance_scale": 4.0,
+            "normalization_min_scale": 0.02,
         },
         "risk": {
             "keyboard_weight": 1,
@@ -278,7 +281,7 @@ def test_openapi_declares_required_authenticated_surfaces_and_safe_errors() -> N
     document = yaml.safe_load(text)
     assert document["openapi"] == "3.1.0"
     assert document["security"] == [{"localSession": []}]
-    assert len(document["paths"]) == 14
+    assert len(document["paths"]) == 18
     required_tokens = (
         "openapi: 3.1.0",
         "security:",
@@ -291,7 +294,50 @@ def test_openapi_declares_required_authenticated_surfaces_and_safe_errors() -> N
         "/v1/auth/login:",
         "/v1/updates:",
         "/v1/admin/models/{user_id}/rollback:",
+        "/v1/enforcement/challenge:",
+        "/v1/enforcement/challenge/{decision_id}/respond:",
+        "/v1/enforcement/status:",
+        "/v1/collection/provenance:",
         "correlation_id:",
     )
     assert all(token in text for token in required_tokens)
     assert "feature_vectors" not in text
+
+
+def _property_names(node: object) -> set[str]:
+    """Every property name declared anywhere beneath a schema node."""
+
+    found: set[str] = set()
+    if isinstance(node, dict):
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            found.update(str(key) for key in properties)
+        for value in node.values():
+            found |= _property_names(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _property_names(item)
+    return found
+
+
+def test_openapi_never_returns_a_security_challenge_answer() -> None:
+    """No enforcement operation may declare an answer field in a response."""
+
+    document = yaml.safe_load(
+        (ROOT / "protocol" / "schemas" / "api.openapi.yaml").read_text(encoding="utf-8")
+    )
+    checked = 0
+    for path, operations in document["paths"].items():
+        if not path.startswith("/v1/enforcement"):
+            continue
+        for method, operation in operations.items():
+            if method == "parameters" or not isinstance(operation, dict):
+                continue
+            checked += 1
+            exposed = {
+                name
+                for name in _property_names(operation.get("responses", {}))
+                if "answer" in name
+            }
+            assert not exposed, f"{method} {path} response exposes {sorted(exposed)}"
+    assert checked == 4

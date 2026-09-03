@@ -399,3 +399,18 @@ class SQLiteApiBackend:
                 "expires_at": pending.expires_at.isoformat().replace("+00:00", "Z"),
             },
         }
+
+    def collection_provenance(self) -> dict[str, str]:
+        """Report what this run records, derived from the storage profile.
+
+        Read directly from StorageSettings so the reported value cannot
+        disagree with what is actually written to disk.
+        """
+
+        settings = self.storage.settings
+        return {
+            "environment": settings.environment.value,
+            "data_policy": settings.data_policy.value,
+            "collection_provenance": settings.collection_provenance.value,
+            "config_version": settings.config_version,
+        }

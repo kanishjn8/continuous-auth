@@ -262,6 +262,192 @@ paths:
                 $ref: "#/components/schemas/AdminActionResponse"
         default:
           $ref: "#/components/responses/ApiError"
+  /v1/enforcement/challenge:
+    get:
+      operationId: getSecurityChallenge
+      description: >-
+        Report whether the participant has completed first-run challenge setup,
+        and the question only. The answer is stored as a salted digest and is
+        never returned by any operation.
+      responses:
+        "200":
+          description: Challenge configuration state
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [configured, question]
+                properties:
+                  configured:
+                    type: boolean
+                  question:
+                    type: string
+                    nullable: true
+        default:
+          $ref: "#/components/responses/ApiError"
+    put:
+      operationId: setSecurityChallenge
+      description: >-
+        Complete first-run setup, or rotate an existing challenge. Rotation
+        requires current_answer; without it the request is rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [question, answer, confirm_answer]
+              properties:
+                question:
+                  type: string
+                  minLength: 4
+                answer:
+                  type: string
+                  minLength: 4
+                confirm_answer:
+                  type: string
+                  minLength: 4
+                current_answer:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Challenge stored and audited without recording the answer
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [configured, correlation_id]
+                properties:
+                  configured:
+                    type: boolean
+                  correlation_id:
+                    type: string
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/enforcement/challenge/{decision_id}/respond:
+    parameters:
+      - name: decision_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: respondToSecurityChallenge
+      description: >-
+        Resolve a dispatched challenge. The native prompt authenticates with
+        the one-time X-Challenge-Token issued for this decision; an
+        authenticated dashboard session may respond without it. One dispatched
+        challenge permits exactly one attempt.
+      parameters:
+        - name: X-Challenge-Token
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [answer]
+              properties:
+                answer:
+                  type: string
+      responses:
+        "200":
+          description: Response recorded against the originating decision
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [outcome, correlation_id]
+                properties:
+                  outcome:
+                    type: string
+                    enum: [ACCEPTED, REJECTED, EXPIRED]
+                  correlation_id:
+                    type: string
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/enforcement/status:
+    get:
+      operationId: getEnforcementStatus
+      description: >-
+        Observability for the enforcement path. The native prompt remains the
+        enforcement mechanism; this reports what is outstanding, never the
+        answer.
+      responses:
+        "200":
+          description: Enforcement and pending-challenge state
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [enforcement_enabled, configured, pending_challenge]
+                properties:
+                  enforcement_enabled:
+                    type: boolean
+                  configured:
+                    type: boolean
+                  pending_challenge:
+                    nullable: true
+                    type: object
+                    additionalProperties: false
+                    required:
+                      [decision_id, action, question, blocking, opened_at, expires_at]
+                    properties:
+                      decision_id:
+                        type: string
+                      action:
+                        type: string
+                        enum: [SOFT_CHALLENGE, REAUTH]
+                      question:
+                        type: string
+                      blocking:
+                        type: boolean
+                      opened_at:
+                        type: string
+                        format: date-time
+                      expires_at:
+                        type: string
+                        format: date-time
+        default:
+          $ref: "#/components/responses/ApiError"
+  /v1/collection/provenance:
+    get:
+      operationId: getCollectionProvenance
+      summary: Report the storage environment and derived collection provenance
+      responses:
+        "200":
+          description: Active storage profile identity
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [environment, data_policy, collection_provenance, config_version]
+                properties:
+                  environment:
+                    type: string
+                    enum: [DEVELOPMENT, PILOT, EVALUATION]
+                  data_policy:
+                    type: string
+                    enum: [SYNTHETIC_ONLY, APPROVED_COLLECTION]
+                  collection_provenance:
+                    type: string
+                    enum: [SYNTHETIC, PUBLIC, TEAM, PILOT]
+                  config_version:
+                    type: string
+        default:
+          $ref: "#/components/responses/ApiError"
 components:
   securitySchemes:
     localSession:

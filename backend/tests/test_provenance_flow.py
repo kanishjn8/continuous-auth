@@ -129,3 +129,31 @@ def test_session_entry_evidence_is_not_labelled_synthetic() -> None:
     ).read_text(encoding="utf-8")
     assert "synthetic-entry-" not in source
     assert "session-entry-" in source
+
+
+def test_provenance_endpoint_reports_the_active_store(tmp_path: Path) -> None:
+    """An operator must be able to confirm what a run is recording."""
+
+    from backend.app.api.backend import SQLiteApiBackend
+    from backend.app.storage.service import StorageService
+
+    settings = _settings(PILOT_CONFIG, tmp_path)
+    backend = SQLiteApiBackend(
+        StorageService.open(settings), active_user_provider=lambda: None
+    )
+    reported = backend.collection_provenance()
+    assert reported["environment"] == "PILOT"
+    assert reported["data_policy"] == "APPROVED_COLLECTION"
+    assert reported["collection_provenance"] == "PILOT"
+    assert reported["config_version"] == settings.config_version
+
+
+def test_provenance_endpoint_reports_synthetic_for_development(tmp_path: Path) -> None:
+    from backend.app.api.backend import SQLiteApiBackend
+    from backend.app.storage.service import StorageService
+
+    settings = _settings(DEVELOPMENT_CONFIG, tmp_path)
+    backend = SQLiteApiBackend(
+        StorageService.open(settings), active_user_provider=lambda: None
+    )
+    assert backend.collection_provenance()["collection_provenance"] == "SYNTHETIC"
