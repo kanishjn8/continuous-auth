@@ -8,6 +8,14 @@ from datetime import UTC, datetime
 from sqlite3 import Connection
 from typing import Generic, TypeVar
 
+from backend.app.decisions.adapters import EnforcementCoordinator
+from backend.app.decisions.challenge import (
+    ChallengeError,
+    ChallengeService,
+    ResponseOutcome,
+    UnknownChallenge,
+)
+from backend.app.decisions.config import EnforcementSettings
 from backend.app.storage.service import StorageService
 from backend.app.updates.manager import UpdateManager
 from backend.app.updates.repository import SQLiteUpdateRepository
@@ -58,11 +66,19 @@ class SQLiteApiBackend:
         active_user_provider: ActiveUserProvider,
         update_manager: UpdateManager | None = None,
         shadow_mode_setter: ShadowModeSetter | None = None,
+        challenge_service: ChallengeService | None = None,
+        enforcement: EnforcementCoordinator | None = None,
+        enforcement_settings: EnforcementSettings | None = None,
+        scheduled_anchor_sink: Callable[..., None] | None = None,
     ) -> None:
         self.storage = storage
         self.active_user_provider = active_user_provider
         self.update_manager = update_manager
         self.shadow_mode_setter = shadow_mode_setter
+        self.challenge_service = challenge_service
+        self.enforcement = enforcement
+        self.enforcement_settings = enforcement_settings
+        self._scheduled_anchor_sink = scheduled_anchor_sink
         self.update_repository = SQLiteUpdateRepository(storage)
 
     def current_state(self) -> CurrentState:
@@ -279,3 +295,96 @@ class SQLiteApiBackend:
         if self.update_manager is None:
             raise ResourceConflict("model rollback is unavailable")
         return self.update_manager.rollback(user_id).profile_version
+
+    def _challenge(self) -> ChallengeService:
+        if self.challenge_service is None:
+            raise ResourceConflict("the security challenge is unavailable")
+        return self.challenge_service
+
+    def challenge_status(self) -> dict[str, object]:
+        """Expose configuration state and the question; never the answer."""
+
+        service = self._challenge()
+        return {"configured": service.is_configured(), "question": service.question()}
+
+    def configure_challenge(
+        self,
+        *,
+        question: str,
+        answer: str,
+        confirm_answer: str,
+        current_answer: str | None,
+    ) -> None:
+        try:
+            self._challenge().configure(
+                question=question,
+                answer=answer,
+                confirm_answer=confirm_answer,
+                current_answer=current_answer,
+            )
+        except ChallengeError as exc:
+            raise ResourceConflict(str(exc)) from exc
+
+    def respond_to_challenge(
+        self,
+        *,
+        decision_id: str,
+        answer: str,
+        response_token: str | None,
+    ) -> str:
+        service = self._challenge()
+        try:
+            result = service.respond(decision_id, answer, response_token=response_token)
+        except UnknownChallenge as exc:
+            raise ResourceNotFound(str(exc)) from exc
+        except ChallengeError as exc:
+            raise ResourceConflict(str(exc)) from exc
+        accepted = result.outcome is ResponseOutcome.ACCEPTED
+        if self.enforcement is not None:
+            self.enforcement.record_challenge_response(
+                decision_id=result.challenge.decision_id,
+                requested_action=result.challenge.action,
+                user_id=result.challenge.user_id,
+                session_id=result.challenge.session_id,
+                segment_id=result.challenge.segment_id,
+                accepted=accepted,
+                code=f"CHALLENGE_{result.outcome.value}",
+                evidence_reference=result.evidence_reference,
+            )
+        if (
+            result.outcome is ResponseOutcome.ACCEPTED
+            and result.challenge.decision_id.startswith("scheduled-anchor:")
+            and self._scheduled_anchor_sink is not None
+            and result.evidence_reference is not None
+        ):
+            # A3 only. An ordinary SOFT_CHALLENGE/REAUTH response already
+            # produces its anchor through EnforcementCoordinator; routing it
+            # here as well would double-record the evidence.
+            self._scheduled_anchor_sink(
+                decision_id=result.challenge.decision_id,
+                session_id=result.challenge.session_id,
+                segment_id=result.challenge.segment_id,
+                evidence_reference=result.evidence_reference,
+            )
+        return result.outcome.value
+
+    def enforcement_status(self) -> dict[str, object]:
+        """Observability only: what is outstanding, never the answer."""
+
+        service = self._challenge()
+        pending = service.active_challenge()
+        return {
+            "enforcement_enabled": self.enforcement_settings is not None
+            and self.enforcement_settings.enabled,
+            "configured": service.is_configured(),
+            "pending_challenge": None
+            if pending is None
+            else {
+                "decision_id": pending.decision_id,
+                "action": pending.action.value,
+                "question": pending.question,
+                "blocking": pending.blocking,
+                "opened_at": pending.opened_at.isoformat().replace("+00:00", "Z"),
+                "expires_at": pending.expires_at.isoformat().replace("+00:00", "Z"),
+            },
+        }

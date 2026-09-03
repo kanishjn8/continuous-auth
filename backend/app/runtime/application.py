@@ -125,6 +125,7 @@ def create_collection_application(
         challenge_service=challenge_service,
         enforcement=orchestrator.enforcement,
         enforcement_settings=enforcement_settings,
+        scheduled_anchor_sink=orchestrator.complete_scheduled_anchor,
     )
     app = create_api_app(
         settings=api_settings,
