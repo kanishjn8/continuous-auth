@@ -22,6 +22,7 @@ from backend.app.risk.config import load_risk_settings
 from backend.app.risk.context_config import load_context_config
 from backend.app.storage.config import load_storage_settings
 from backend.app.storage.service import StorageService
+from backend.app.updates.anchors import ScheduledAnchorScheduler
 from backend.app.updates.config import load_update_settings
 from backend.app.updates.manager import UpdateManager
 from backend.app.updates.repository import SQLiteUpdateRepository
@@ -80,9 +81,11 @@ def create_collection_application(
     orchestration = load_orchestration_settings(orchestration_config)
     collector = load_collector_config(collector_config)
     profile_provider = DirectoryProfileProvider(storage, artifact_root)
-    update_manager = UpdateManager(
-        load_update_settings(updates_config), SQLiteUpdateRepository(storage)
+    update_settings = load_update_settings(updates_config)
+    anchor_scheduler = ScheduledAnchorScheduler(
+        update_settings.update_manager.scheduled_anchor_interval_seconds
     )
+    update_manager = UpdateManager(update_settings, SQLiteUpdateRepository(storage))
     api_settings = load_api_settings(api_config)
     enforcement_settings = load_enforcement_settings(enforcement_config)
     challenge_service = ChallengeService(storage, enforcement_settings)
@@ -111,6 +114,8 @@ def create_collection_application(
         measurement_capacity=orchestration.measurement_capacity,
         enforcement_adapters=enforcement_adapters,
         update_manager=update_manager,
+        anchor_scheduler=anchor_scheduler,
+        challenge_service=challenge_service,
     )
     backend = SQLiteApiBackend(
         storage,

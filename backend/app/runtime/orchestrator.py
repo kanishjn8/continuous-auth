@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from backend.app.decisions.adapters import (
+    ActionAdapter,
+    ActionStatus,
+    AdapterResult,
     EnforcementCoordinator,
     EnforcementNotice,
     VerificationRecord,
 )
+from backend.app.decisions.challenge import ChallengeError, ChallengeService, PendingChallenge
 from backend.app.ingestion.config import IngestionSettings
 from backend.app.ingestion.pipeline import IngestionPipeline
 from backend.app.ingestion.types import (
@@ -29,6 +33,7 @@ from backend.app.risk.engine import RiskEngine
 from backend.app.risk.state import UserStateMachine
 from backend.app.risk.types import DecisionInput, RiskAlert
 from backend.app.storage.service import StorageService
+from backend.app.updates.anchors import ScheduledAnchorScheduler
 from backend.app.updates.manager import SegmentEvidence, UpdateManager
 from ml.features.config import MLConfig
 from ml.features.extractor import window_config_from_ml_config
@@ -41,6 +46,7 @@ from protocol.generated.python.contracts import (
     AppRegistryEvent,
     ContextConfig,
     DataProvenance,
+    DecisionAction,
     DeviceMetadataEvent,
     Health,
     Metrics,
@@ -79,7 +85,10 @@ class RuntimeOrchestrator:
         heartbeat_timeout_seconds: float,
         measurement_capacity: int,
         enforcement: EnforcementCoordinator | None = None,
+        enforcement_adapters: Mapping[DecisionAction, ActionAdapter] | None = None,
         update_manager: UpdateManager | None = None,
+        anchor_scheduler: ScheduledAnchorScheduler | None = None,
+        challenge_service: ChallengeService | None = None,
     ) -> None:
         if provenance not in {DataProvenance.SYNTHETIC, DataProvenance.TEAM, DataProvenance.PILOT}:
             raise ValueError("live runtime provenance must be synthetic, team, or pilot")
@@ -94,11 +103,16 @@ class RuntimeOrchestrator:
         self.heartbeat_timeout_seconds = heartbeat_timeout_seconds
         self.measurements = RuntimeMeasurements(measurement_capacity)
         self.enforcement = enforcement or EnforcementCoordinator(
-            {}, store=storage, notice_sink=self._on_enforcement_notice
+            dict(enforcement_adapters or {}),
+            store=storage,
+            notice_sink=self._on_enforcement_notice,
         )
         self.update_manager = update_manager
+        self.anchor_scheduler = anchor_scheduler
+        self.challenge_service = challenge_service
         self._shadow_mode = storage.shadow_mode_enabled()
         self._active_user: str | None = None
+        self._session_id: str | None = None
         self._session_wall_anchor: datetime | None = None
         self._builders: dict[str, WindowBuilder] = {}
         self._segment_gap_baseline: dict[str, int] = {}
@@ -201,11 +215,19 @@ class RuntimeOrchestrator:
             evidence_reference=evidence_reference,
             authenticated_at=observed,
         )
+        self._session_id = lifecycle.session_id
+        if self.anchor_scheduler is not None:
+            self.anchor_scheduler.session_started(
+                session_id=lifecycle.session_id, at=observed
+            )
         return lifecycle, self._drain_emissions()
 
     def end_session(self, reason: str = "AUTHENTICATED_EXIT") -> tuple[StreamEmission, ...]:
         self.pipeline.end_session(reason)
+        if self.anchor_scheduler is not None and self._session_id is not None:
+            self.anchor_scheduler.session_ended(session_id=self._session_id)
         self._active_user = None
+        self._session_id = None
         self._session_wall_anchor = None
         self._risk_engine = None
         self._scoring = None
@@ -450,6 +472,7 @@ class RuntimeOrchestrator:
             None if self._last_heartbeat_arrival is None else current - self._last_heartbeat_arrival
         )
         if age is None or age <= self.heartbeat_timeout_seconds or self._heartbeat_failed:
+            self.check_scheduled_anchor()
             return self._drain_emissions()
         self._heartbeat_failed = True
         if self._risk_engine is not None:
@@ -468,6 +491,70 @@ class RuntimeOrchestrator:
         self.storage.record_health("runtime", datetime.now(UTC), health)
         self._emissions.append(StreamEmission(StreamEventType.HEALTH, health))
         return self._drain_emissions()
+
+    def check_scheduled_anchor(self, now: datetime | None = None) -> PendingChallenge | None:
+        """Open an A3 prompt when one is due, or return None.
+
+        Called from the heartbeat path so it runs on the existing periodic
+        tick rather than adding a timer. Any failure is swallowed into an
+        availability signal: a missing verification prompt must never take
+        down ingestion (ADR-011, fail-open).
+        """
+
+        if self.anchor_scheduler is None or self.challenge_service is None:
+            return None
+        if self._active_user is None or self._session_id is None:
+            return None
+        segment_id = next(iter(self._builders), None)
+        if segment_id is None:
+            return None
+        instant = now or datetime.now(UTC)
+        if not self.anchor_scheduler.due(session_id=self._session_id, now=instant):
+            return None
+        try:
+            return self.challenge_service.open_scheduled(
+                user_id=self._active_user,
+                session_id=self._session_id,
+                segment_id=segment_id,
+            )
+        except ChallengeError:
+            self._on_ingestion_availability(
+                AvailabilityEvent(
+                    code="SCHEDULED_ANCHOR_UNAVAILABLE",
+                    component="verification",
+                    detail="scheduled verification prompt could not be opened",
+                )
+            )
+            return None
+
+    def complete_scheduled_anchor(
+        self,
+        *,
+        decision_id: str,
+        session_id: str,
+        segment_id: str,
+        evidence_reference: str,
+        at: datetime | None = None,
+    ) -> None:
+        """Record an A3 anchor for a correctly answered scheduled prompt."""
+
+        del decision_id
+        if self._active_user is None:
+            return
+        instant = at or datetime.now(UTC)
+        verification = self.enforcement.record_scheduled_verification(
+            user_id=self._active_user,
+            session_id=session_id,
+            segment_id=segment_id,
+            result=AdapterResult(
+                ActionStatus.SUCCEEDED,
+                "SCHEDULED_VERIFICATION_ACCEPTED",
+                evidence_reference,
+            ),
+            authenticated_at=instant,
+        )
+        if verification is not None and self.anchor_scheduler is not None:
+            self.anchor_scheduler.anchor_recorded(session_id=session_id, at=instant)
 
     def _progress_state(self, *, after_score: bool) -> None:
         if self._active_user is None or self._risk_engine is None:
@@ -513,7 +600,8 @@ class RuntimeOrchestrator:
         self._progress_state(after_score=True)
         context = self.context_layer.assess(
             user_id=window.user_id,
-            category=window.context.dominant_category,
+            shares=window.context.app_shares,
+            dominant_category=window.context.dominant_category,
         )
         outcome = self._risk_engine.process(
             DecisionInput(
@@ -526,6 +614,24 @@ class RuntimeOrchestrator:
         )
         if outcome.decision is None:
             return
+        if outcome.decision.risk_level == RiskLevel.LOW and outcome.decision.fused_score is not None:
+            # ADR-008 empirical layer: accumulate this user's own genuine
+            # (LOW-risk) score statistics per application so
+            # ContextConfidenceLayer can supersede the static bootstrap map
+            # once enough observations exist. Gated on LOW risk rather than
+            # "during enrollment" (the ADR's original phrasing) because the
+            # implemented state machine never produces a decision at all
+            # during ENROLLING -- decisions only start in CALIBRATING/ACTIVE,
+            # so that is where genuine variance is actually observable.
+            #
+            # Attribution is per-application and focus-weighted, so a window
+            # spanning a switch feeds partial evidence to each application it
+            # actually covered rather than all of it to the dominant one.
+            self.context_layer.observe_genuine(
+                user_id=window.user_id,
+                shares=window.context.app_shares,
+                risk_score=outcome.decision.fused_score,
+            )
         self.storage.store_risk_decision(outcome.decision)
         self.enforcement.execute(outcome.decision)
         for alert in outcome.alerts:
