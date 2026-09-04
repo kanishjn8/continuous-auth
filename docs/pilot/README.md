@@ -17,15 +17,22 @@ titles, document names, paths, network addresses, clipboard, images, or screen d
 The collection CLI provides aggregate health and freeze operations:
 
 ```powershell
-python -m tools.collection --config config/collection.development.yaml health `
+python -m tools.collection --config config/collection.pilot.yaml health `
   --database $env:CA_STORAGE_DB --administration data/collection/administration.json
-python -m tools.collection --config config/collection.development.yaml freeze `
+python -m tools.collection --config config/collection.pilot.yaml freeze `
   --database $env:CA_STORAGE_DB --administration data/collection/administration.json `
   --version pilot-v1 --output data/frozen/pilot-v1/manifest.json
 ```
 
-The development collection settings are unreviewed placeholders. Missing/inactive
-consent, missing enrollment, or non-participant provenance blocks evaluation eligibility.
-A freeze is write-once, day-disjoint, and checksum-verified; late windows are not added
-to it. Recruitment, consent, installation support, A3 prompt completion, informed
-mimicry, and live takeover are not automatable.
+Missing/inactive consent, missing enrollment, or non-participant provenance blocks
+evaluation eligibility. A freeze is write-once, day-disjoint, and checksum-verified;
+late windows are not added to it. Recruitment, consent, installation support, A3 prompt
+completion, informed mimicry, and live takeover are not automatable.
+
+Runtime tunables in the api, risk, context, orchestration, updates, and enforcement
+configs remain unreviewed development placeholders (each loader requires
+`development_only: true`) regardless of collection round. The data those runtime
+components process is nonetheless real `PILOT` data once collection is underway: the
+storage profile (`config/storage.pilot.yaml`) and this collection profile
+(`config/collection.pilot.yaml`) are the reviewed configuration that governs it, and
+provenance is derived from the storage profile alone.

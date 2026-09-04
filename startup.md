@@ -92,9 +92,10 @@ curl http://127.0.0.1:8080/healthz
 docker compose down
 ```
 
-The named `runtime-data` volume retains disposable synthetic development state. To
-delete that state as well, run `docker compose down --volumes`; this is destructive and
-cannot be undone.
+The named `runtime-data` volume retains disposable `SYNTHETIC` state written under the
+container's development storage profile (`config/storage.development.yaml`); this
+Compose path never records `PILOT` participant data. To delete that state as well, run
+`docker compose down --volumes`; this is destructive and cannot be undone.
 
 ## 3. Start the complete application on Windows
 
@@ -155,8 +156,9 @@ $env:CA_DASHBOARD_SECRET = Read-Host "Temporary local dashboard secret"
 ```
 
 Runtime databases, audit records, and model artifacts stay outside the repository and
-must never be committed. The supplied configuration accepts synthetic development
-provenance only.
+must never be committed. By default this run records real `PILOT` participant data
+through `config/storage.pilot.yaml`; pass `--storage-config
+config/storage.development.yaml` to record disposable `SYNTHETIC` data instead.
 
 ### Step 5: start the integrated backend and ML engine
 
@@ -164,15 +166,17 @@ In the first PowerShell terminal, with the virtual environment active:
 
 ```powershell
 python -m backend.app.runtime.cli `
-  --synthetic-user synthetic-user `
+  --participant-id <pseudonym> `
   --artifact-root $artifactRoot `
   --dashboard-directory dashboard/dist
 ```
 
-This command validates all development configuration, opens the SQLite/WAL store,
-starts an authenticated synthetic session, loads any active schema-compatible model
-profile, starts ingestion and risk processing, creates the Windows named pipe, and
-serves the API, WebSocket, and built dashboard at `127.0.0.1:8765`.
+This command validates configuration, opens the SQLite/WAL store, starts a `PILOT`
+collection session against the default `config/storage.pilot.yaml` profile (pass
+`--storage-config config/storage.development.yaml` for a disposable `SYNTHETIC`
+session instead), loads any active schema-compatible model profile, starts ingestion
+and risk processing, creates the Windows named pipe, and serves the API, WebSocket, and
+built dashboard at `127.0.0.1:8765`.
 
 An absent model remains loud and fail-open. The user may remain `ENROLLING` or the
 system may report model unavailability until a reviewed model artifact is trained and

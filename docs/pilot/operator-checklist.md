@@ -21,7 +21,8 @@ administration under `data/` uses only the assigned pseudonym.
 
 - Review only aggregate coverage, modality balance, gaps, quality labels, heartbeat,
   and device-change alerts.
-- Record completed A3 prompts only after an independent successful verification.
+- Confirm scheduled verification prompts are being answered; the system records A3
+  anchors automatically and operators do not create them by hand.
 - Pause for participant-requested breaks and investigate loud availability/tamper alerts.
 - Never substitute continuous low risk for consent or a verification anchor.
 

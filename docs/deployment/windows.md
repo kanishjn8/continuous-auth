@@ -31,11 +31,13 @@ Extract the resulting archive on the clean test machine and run:
 ```powershell
 powershell -ExecutionPolicy Bypass -File install.ps1
 $env:CA_DASHBOARD_SECRET = Read-Host "Temporary local dashboard secret"
-powershell -ExecutionPolicy Bypass -File run-development.ps1 -SyntheticUser synthetic-user
+powershell -ExecutionPolicy Bypass -File run-development.ps1 -ParticipantId <pseudonym>
 ```
 
-Open `http://127.0.0.1:8765`. The packaged launcher is deliberately restricted to
-`SYNTHETIC` provenance. It must not be relabelled or used for participant collection.
+Open `http://127.0.0.1:8765`. The default `-StorageProfile` is `storage.pilot.yaml`, so
+this records real `PILOT` participant data. Pass `-StorageProfile
+storage.development.yaml` to select the synthetic profile and record disposable
+`SYNTHETIC` data instead.
 
 ## Human acceptance matrix
 

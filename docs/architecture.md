@@ -34,5 +34,9 @@ only confidence with a configured nonzero floor and never enters identity-model 
 
 All contracts originate in `protocol/`, all feature computations originate in
 `ml/features/`, and all tunable thresholds, capacities, cadences, and quality limits
-originate in `config/`. Development launchers accept synthetic provenance only; pilot
-operation requires separately reviewed consent, storage, and collection configuration.
+originate in `config/`. The default launcher records real `PILOT` data against a
+separately reviewed storage and collection profile; provenance is derived solely from
+the storage profile in use, with no other place to set it (spec Section 7.3). Runtime
+tunables in the api, risk, context, orchestration, updates, and enforcement configs
+remain unreviewed development placeholders regardless of which storage profile is
+active.

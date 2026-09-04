@@ -1,6 +1,8 @@
 # Demo runbook
 
-1. Start the packaged synthetic runtime and collector.
+1. Start the packaged runtime and collector against the demo's `SYNTHETIC` storage
+   profile (`config/storage.development.yaml`); the demo intentionally does not use
+   the `PILOT` default.
 2. Sign in to the loopback dashboard.
 3. Show Overview, Live, Alerts, History, System Health, and Profiles.
 4. Stop the collector and show the tamper/availability state after the configured

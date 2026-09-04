@@ -1,4 +1,4 @@
-"""Run the complete Windows synthetic-development stack."""
+"""Run the complete Windows collection stack."""
 
 from __future__ import annotations
 
