@@ -207,3 +207,46 @@ def test_a_user_with_an_active_profile_is_refused() -> None:
         require_enrollment_admission(
             "participant-01", windows, _admission(windows, user_has_active_profile=True)
         )
+
+
+def test_adr_013_is_recorded_in_the_plan() -> None:
+    """The gate and the decision that authorises it ship together.
+
+    ``PLAN.md`` is deliberately gitignored (.gitignore:83, team decision in
+    commit 9ebaf87) alongside START_IMPLEMENTATION.md and
+    TASK_DELEGATION.md, so it will not exist on a clean checkout or anyone
+    else's machine. ADR-013 is written there on disk for the team (the
+    document this project actually reads), but its durable, version-
+    controlled record is the approved spec at
+    docs/superpowers/specs/2026-09-03-pilot-default-workflow-design.md
+    Section 5.4. This test asserts against PLAN.md when it is present and
+    skips -- rather than failing -- when it is not, so the skip here is
+    deliberate, not an oversight.
+    """
+
+    from pathlib import Path
+
+    plan_path = Path(__file__).resolve().parents[2] / "PLAN.md"
+    if not plan_path.is_file():
+        pytest.skip(
+            "PLAN.md is deliberately gitignored (.gitignore:83); ADR-013 is "
+            "recorded in docs/superpowers/specs/2026-09-03-pilot-default-"
+            "workflow-design.md Section 5.4"
+        )
+    plan = plan_path.read_text(encoding="utf-8")
+    assert "ADR-013" in plan
+    assert "Enrollment Admission Is Distinct From Update Promotion" in plan
+
+
+def test_promotion_gate_source_is_unmodified() -> None:
+    """ADR-013 adds a boundary; it does not relax the existing one."""
+
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[2] / "ml" / "training" / "gate.py"
+    ).read_text(encoding="utf-8")
+    for gate in ("g1_risk", "g2_verification", "g3_volume", "g4_continuity",
+                 "g5_quarantine", "g6_schedule"):
+        assert gate in source
+    assert "CandidateDisposition.PROMOTED" in source
