@@ -79,3 +79,40 @@ def test_g11_rejects_model_load_without_schema_check() -> None:
 
 def test_repository_satisfies_all_guardrails() -> None:
     assert scan_repository() == []
+
+
+def test_training_call_may_cite_the_enrollment_boundary() -> None:
+    from tools.guardrails.check import check_training_gate
+
+    findings = check_training_gate(
+        "train.py", "require_enrollment_admission(user, windows, admission)\nmodel.fit(X)"
+    )
+    assert findings == []
+
+
+def test_training_call_with_no_boundary_is_still_flagged() -> None:
+    from tools.guardrails.check import check_training_gate
+
+    findings = check_training_gate("train.py", "model.fit(X)")
+    assert len(findings) == 1
+    assert findings[0].code == "G07_PROMOTION_GATE"
+
+
+def test_common_must_reference_both_boundaries() -> None:
+    """Neither boundary may be deleted without the guardrail failing."""
+
+    from tools.guardrails.check import check_admission_boundaries_present
+
+    complete = "require_promotion_gate\nrequire_enrollment_admission"
+    assert check_admission_boundaries_present("ml/training/common.py", complete) == []
+
+    missing = "require_promotion_gate only"
+    findings = check_admission_boundaries_present("ml/training/common.py", missing)
+    assert len(findings) == 1
+    assert findings[0].code == "G07_ADMISSION_BOUNDARY"
+
+
+def test_other_files_are_not_required_to_reference_both() -> None:
+    from tools.guardrails.check import check_admission_boundaries_present
+
+    assert check_admission_boundaries_present("ml/training/other.py", "nothing") == []

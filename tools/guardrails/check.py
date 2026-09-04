@@ -40,6 +40,11 @@ class Finding:
         location = f"{self.path}:{self.line}" if self.line is not None else self.path
         return f"[{self.rule}] {location}: {self.message}"
 
+    @property
+    def code(self) -> str:
+        """Alias for ``rule``; callers may address the finding's code either way."""
+        return self.rule
+
 
 def _finding(rule: str, path: str, message: str, line: int | None = None) -> list[Finding]:
     return [Finding(rule=rule, path=path, message=message, line=line)]
@@ -189,13 +194,43 @@ def check_monitoring_invariants(path: str, text: str) -> list[Finding]:
 
 def check_training_gate(path: str, text: str) -> list[Finding]:
     training_call = re.search(r"\.(fit|partial_fit)\s*\(|\btrain_model\s*\(", text)
-    if training_call and "require_promotion_gate" not in text:
+    boundaries = ("require_promotion_gate", "require_enrollment_admission")
+    if training_call and not any(name in text for name in boundaries):
         line = text[: training_call.start()].count("\n") + 1
         return _finding(
             "G07_PROMOTION_GATE",
             path,
-            "training call lacks the require_promotion_gate boundary",
+            "training call lacks a reviewed admission boundary "
+            "(require_promotion_gate or require_enrollment_admission)",
             line,
+        )
+    return []
+
+
+_ADMISSION_ROUTER = "ml/training/common.py"
+
+
+def check_admission_boundaries_present(path: str, text: str) -> list[Finding]:
+    """Both admission boundaries must remain reachable from the router.
+
+    ADR-013 splits training-data admission into an update path and an
+    enrollment path. Deleting either one silently would make the other the
+    only route, which is exactly the kind of quiet weakening this guardrail
+    exists to catch.
+    """
+
+    if not path.replace("\\", "/").endswith(_ADMISSION_ROUTER):
+        return []
+    missing = [
+        name
+        for name in ("require_promotion_gate", "require_enrollment_admission")
+        if name not in text
+    ]
+    if missing:
+        return _finding(
+            "G07_ADMISSION_BOUNDARY",
+            path,
+            f"training admission router is missing: {', '.join(missing)}",
         )
     return []
 
@@ -344,6 +379,7 @@ def scan_repository() -> list[Finding]:
             findings.extend(check_hardcoded_tunables(path_text, text))
         if path_text.startswith("ml/training/") or path_text.startswith("backend/app/updates/"):
             findings.extend(check_training_gate(path_text, text))
+            findings.extend(check_admission_boundaries_present(path_text, text))
         if path_text.startswith("backend/app/features/") and path.name != "__init__.py":
             findings.extend(check_shared_feature_consumer(path_text, text))
         if path_text.startswith("backend/app/models/"):
