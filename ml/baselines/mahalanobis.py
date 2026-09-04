@@ -11,6 +11,7 @@ import numpy as np
 from ml.features.config import MLConfig
 from ml.features.schema import FeatureWindow
 from ml.training.common import Modality, ModelArtifact, train_one_class_model
+from ml.training.enrollment import EnrollmentAdmission
 
 
 class MahalanobisWrapper:
@@ -46,6 +47,8 @@ def train_user_modality_mahalanobis(
     modality: Modality,
     windows: Sequence[FeatureWindow],
     config: MLConfig,
+    *,
+    enrollment_admission: EnrollmentAdmission | None = None,
 ) -> ModelArtifact:
     ridge = float(config.raw["mahalanobis_baseline"]["ridge"])
     hyperparameters: dict[str, object] = {"ridge": ridge}
@@ -57,4 +60,5 @@ def train_user_modality_mahalanobis(
         model_type="mahalanobis_centroid",
         hyperparameters=hyperparameters,
         min_windows=config.raw["per_user_normalization"]["min_baseline_windows"],
+        enrollment_admission=enrollment_admission,
     )

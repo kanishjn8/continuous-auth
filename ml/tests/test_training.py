@@ -423,3 +423,93 @@ def test_score_single_fused_window_refuses_on_schema_mismatch(ml_config):
     tampered = windows[0].model_copy(update={"schema_version": "9.9.9-incompatible"})
     with pytest.raises(ModelSchemaMismatchError):
         score_single_fused_window(artifact, tampered)
+
+
+# --- Enrollment admission boundary routing (ADR-013, Task 2) --------------
+
+
+def _ml_config():
+    from ml.features.config import load_config
+
+    return load_config()
+
+
+def _pilot_windows(user_id: str = "participant-01"):
+    """Windows with real keyboard/mouse feature blocks, spread over 3
+    distinct collection days (>= min_baseline_windows=20, >= the enrollment
+    gate's min_distinct_days=3), reclassified as PILOT provenance the same
+    way test_training_rejects_team_data_without_promotion_evidence
+    reclassifies synthetic windows as TEAM.
+    """
+    from ml.features.schema import Provenance
+    from ml.tests.conftest import generate_multiday_user_windows
+
+    windows = generate_multiday_user_windows(
+        user_id,
+        base_seed=1,
+        config=_ml_config(),
+        num_days=3,
+        segments_per_day=2,
+        segment_minutes=20,
+    )
+    return [w.model_copy(update={"provenance": Provenance.PILOT}) for w in windows]
+
+
+def _synthetic_windows(user_id: str = "synthetic-user"):
+    return generate_user_windows(user_id, seed=1, config=_ml_config(), duration_minutes=60)
+
+
+def _valid_admission(windows, *, user_id: str = "participant-01"):
+    # Reuses the enrollment-admission fixture construction from
+    # ml/tests/test_enrollment_gate.py rather than duplicating it; that
+    # helper's consent/enrollment records are pinned to "participant-01",
+    # which is the default user_id both here and in _pilot_windows above.
+    from ml.tests.test_enrollment_gate import _admission
+
+    return _admission(windows)
+
+
+def test_pilot_windows_with_neither_boundary_still_raise() -> None:
+    """The existing failure mode is preserved exactly."""
+
+    windows = _pilot_windows()
+    with pytest.raises(PromotionGateRequiredError):
+        train_user_modality_isolation_forest(
+            "participant-01", "keyboard", windows, _ml_config()
+        )
+
+
+def test_pilot_windows_with_both_boundaries_are_rejected() -> None:
+    """An ambiguous admission route is how a boundary silently becomes optional."""
+
+    windows = _pilot_windows()
+    with pytest.raises(ValueError, match="exactly one"):
+        train_user_modality_isolation_forest(
+            "participant-01",
+            "keyboard",
+            windows,
+            _ml_config(),
+            promoted_candidates={},
+            enrollment_admission=_valid_admission(windows),
+        )
+
+
+def test_pilot_windows_train_with_enrollment_admission() -> None:
+    windows = _pilot_windows()
+    artifact = train_user_modality_isolation_forest(
+        "participant-01",
+        "keyboard",
+        windows,
+        _ml_config(),
+        enrollment_admission=_valid_admission(windows),
+    )
+    assert artifact.user_id == "participant-01"
+
+
+def test_synthetic_windows_still_need_no_boundary() -> None:
+    """Requirement: existing synthetic development paths are unaffected."""
+
+    artifact = train_user_modality_isolation_forest(
+        "synthetic-user", "keyboard", _synthetic_windows(), _ml_config()
+    )
+    assert artifact.user_id == "synthetic-user"

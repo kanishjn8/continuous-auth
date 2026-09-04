@@ -31,6 +31,7 @@ from ml.features.keyboard import KEYBOARD_FEATURE_NAMES
 from ml.features.mouse import MOUSE_FEATURE_NAMES
 from ml.features.schema import FeatureWindow
 from ml.training.common import ModelArtifact, ModelSchemaMismatchError, train_one_class_model
+from ml.training.enrollment import EnrollmentAdmission
 from ml.training.model_wrappers import IsolationForestWrapper
 
 
@@ -38,6 +39,8 @@ def train_user_single_fused_model(
     user_id: str,
     windows: Sequence[FeatureWindow],
     config: MLConfig,
+    *,
+    enrollment_admission: EnrollmentAdmission | None = None,
 ) -> ModelArtifact:
     """Train the ADR-006 single fused-vector comparison model.
 
@@ -62,6 +65,7 @@ def train_user_single_fused_model(
         model_type="single_fused_isolation_forest",
         hyperparameters=hyperparameters,
         min_windows=config.raw["per_user_normalization"]["min_baseline_windows"],
+        enrollment_admission=enrollment_admission,
     )
 
 

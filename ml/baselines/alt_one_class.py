@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from ml.features.config import MLConfig
 from ml.features.schema import FeatureWindow
 from ml.training.common import Modality, ModelArtifact, train_one_class_model
+from ml.training.enrollment import EnrollmentAdmission
 from ml.training.model_wrappers import OneClassSVMWrapper
 
 
@@ -17,6 +18,8 @@ def train_user_modality_one_class_svm(
     modality: Modality,
     windows: Sequence[FeatureWindow],
     config: MLConfig,
+    *,
+    enrollment_admission: EnrollmentAdmission | None = None,
 ) -> ModelArtifact:
     hp = config.raw["one_class_svm_baseline"]
     hyperparameters = {
@@ -32,4 +35,5 @@ def train_user_modality_one_class_svm(
         model_type="one_class_svm",
         hyperparameters=hyperparameters,
         min_windows=config.raw["per_user_normalization"]["min_baseline_windows"],
+        enrollment_admission=enrollment_admission,
     )

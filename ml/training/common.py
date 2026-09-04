@@ -22,7 +22,8 @@ import numpy as np
 from ml.calibration.percentile import PercentileCalibrator
 from ml.features.keyboard import KEYBOARD_FEATURE_NAMES
 from ml.features.mouse import MOUSE_FEATURE_NAMES
-from ml.features.schema import FEATURE_SCHEMA_VERSION, FeatureWindow
+from ml.features.schema import FEATURE_SCHEMA_VERSION, FeatureWindow, Provenance
+from ml.training.enrollment import EnrollmentAdmission, require_enrollment_admission
 from ml.training.gate import require_promotion_gate
 from protocol.generated.python.contracts import UpdateCandidate
 
@@ -219,6 +220,44 @@ def _training_metadata(
     return artifact
 
 
+_DEVELOPMENT_PROVENANCE = frozenset({Provenance.SYNTHETIC, Provenance.PUBLIC})
+
+
+def _admit_training_data(
+    user_id: str,
+    windows: Sequence[FeatureWindow],
+    *,
+    promoted_candidates: Mapping[str, UpdateCandidate] | None,
+    enrollment_admission: EnrollmentAdmission | None,
+) -> None:
+    """Route training data through exactly one reviewed admission boundary.
+
+    Synthetic and public development data needs neither. Any team or pilot
+    window requires exactly one: the Model Update Manager promotion gate for
+    an existing profile (ADR unchanged, PLAN.md Section 12), or the ADR-013
+    enrollment gate for a first profile.
+
+    There is deliberately no fallback. Absence of `promoted_candidates` never
+    implies enrollment mode, because a boundary that can be reached by
+    omitting an argument is not a boundary.
+    """
+
+    if promoted_candidates is not None and enrollment_admission is not None:
+        raise ValueError(
+            "training data must pass exactly one admission boundary; "
+            "promoted_candidates and enrollment_admission are mutually exclusive"
+        )
+    if enrollment_admission is not None:
+        if all(window.provenance in _DEVELOPMENT_PROVENANCE for window in windows):
+            raise ValueError(
+                "enrollment admission is for participant data; synthetic and "
+                "public windows require no admission boundary"
+            )
+        require_enrollment_admission(user_id, windows, enrollment_admission)
+        return
+    require_promotion_gate(user_id, windows, promoted_candidates)
+
+
 def train_one_class_model(
     user_id: str,
     modality: Modality,
@@ -229,6 +268,7 @@ def train_one_class_model(
     hyperparameters: dict[str, object],
     min_windows: int,
     promoted_candidates: Mapping[str, UpdateCandidate] | None = None,
+    enrollment_admission: EnrollmentAdmission | None = None,
 ) -> ModelArtifact:
     """Generic per-user, single-modality one-class training routine.
 
@@ -249,7 +289,12 @@ def train_one_class_model(
             f"({distinct_users}); per-user model isolation (P3) violated"
         )
 
-    require_promotion_gate(user_id, windows, promoted_candidates)
+    _admit_training_data(
+        user_id,
+        windows,
+        promoted_candidates=promoted_candidates,
+        enrollment_admission=enrollment_admission,
+    )
 
     X, used = build_feature_matrix(windows, modality)
     if len(used) < min_windows:
