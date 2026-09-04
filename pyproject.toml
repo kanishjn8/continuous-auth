@@ -43,6 +43,7 @@ testpaths = [
   "tools/collection/tests",
   "tools/enrollment/tests",
   "tools/evaluation/tests",
+  "tools/experiments/tests",
   "tools/faultinjection/tests",
   "tools/synthetic/tests",
   "tools/updates/tests",
