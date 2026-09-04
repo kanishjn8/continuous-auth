@@ -30,6 +30,7 @@ from ml.features.schema import (
     QualityLabel,
 )
 from ml.tests.conftest import generate_multiday_user_windows
+from ml.tests.test_training import _ml_config, _pilot_windows, _valid_admission
 from ml.training.common import ModelArtifact, ModelSchemaMismatchError, PreprocessingParams
 from ml.training.isolation_forest import train_user_modality_isolation_forest
 
@@ -464,3 +465,99 @@ def test_run_fusion_vs_single_model_comparison_surfaces_single_model_imputation_
     # block reads as far more anomalous than the dual model's honest
     # "score on keyboard alone" for the exact same genuine windows.
     assert single_kbd_only.mean_percentile_score < dual_kbd_only.mean_percentile_score
+
+
+# --- Enrollment admission threaded through evaluation (ADR-013, Task 6) ----
+#
+# Adaptation note: the brief's literal helper calls do not survive contact
+# with day_disjoint_split. ``_pilot_windows()`` (Task 2) spans exactly the
+# three days 2026-01-01..03 (not "2026-09-03", which appears in no window
+# and would make day_disjoint_split raise before the admission boundary is
+# ever reached), and ``_synthetic_windows()`` spans a single day, which
+# day_disjoint_split refuses to hold out entirely (it would leave nothing to
+# train on). ``_valid_admission(windows)`` also fixes min_distinct_days=3
+# against whatever windows are actually handed to the trainer -- which, once
+# run_baseline_comparison holds one day out for testing, is the *training*
+# subset, not the full corpus. Holding a day out of ``_pilot_windows()``'s
+# 3-day corpus would leave only 2 distinct training days, short of that
+# floor, so the "trains" case below uses a local 4-day pilot corpus instead
+# (same construction as ``_pilot_windows``, one more day) so 3 days remain
+# after the split. The "raises" case is unaffected by that floor (the
+# promotion gate rejects on provenance before any admission check runs), so
+# it keeps the unmodified 3-day ``_pilot_windows()``. The synthetic case
+# uses a local 3-day synthetic corpus for the same day-disjoint-split reason.
+
+
+def _pilot_windows_multi_day(user_id: str = "participant-01", *, num_days: int = 4):
+    windows = generate_multiday_user_windows(
+        user_id,
+        base_seed=1,
+        config=_ml_config(),
+        num_days=num_days,
+        segments_per_day=2,
+        segment_minutes=20,
+    )
+    return [w.model_copy(update={"provenance": Provenance.PILOT}) for w in windows]
+
+
+def test_pilot_corpus_without_admission_raises() -> None:
+    """Today's failure mode is preserved: real data needs a boundary."""
+
+    from ml.training.gate import PromotionGateRequiredError
+
+    corpus = {"participant-01": _pilot_windows()}
+    with pytest.raises(PromotionGateRequiredError):
+        run_baseline_comparison(
+            corpus, "keyboard", {"participant-01": ["2026-01-03"]}, _ml_config()
+        )
+
+
+def test_pilot_corpus_with_admission_trains() -> None:
+    """``admission`` unblocks training on this participant's PILOT windows.
+
+    Only training is asserted here, not a computed EER: ``admission`` is a
+    single object forwarded identically to every trainer call in this run
+    (per this task's interface), so it can admit only one consenting
+    participant at a time. A second corpus user would either need the same
+    (mismatched) consent record -- refused by eligibility -- or synthetic
+    windows, which ``_admit_training_data`` itself refuses to train under a
+    non-``None`` admission (that guard is exactly what stops admitted
+    participant evidence from being silently mixed with synthetic data).
+    Multi-user cross-evaluation is already covered by the synthetic-corpus
+    tests elsewhere in this file; what ADR-013 adds is that training itself
+    -- producing an artifact -- no longer raises for this user.
+    """
+
+    windows = _pilot_windows_multi_day()
+    corpus = {"participant-01": windows}
+    results = run_baseline_comparison(
+        corpus,
+        "keyboard",
+        {"participant-01": ["2026-01-04"]},
+        _ml_config(),
+        model_types=("isolation_forest",),
+        admission=_valid_admission(windows),
+    )
+    assert "isolation_forest" in results
+    assert "participant-01" in results["isolation_forest"].artifacts
+
+
+def test_synthetic_corpus_needs_no_admission() -> None:
+    """Existing synthetic evaluation behaviour is unchanged.
+
+    Cross-evaluation (I1) needs a second user to supply impostor scores, so
+    this reuses the two-user corpus already used throughout this file rather
+    than the brief's single-user ``_synthetic_windows()`` (which also, being
+    single-day, cannot be day-disjoint split at all).
+    """
+
+    corpus = _two_user_corpus(_ml_config())
+    results = run_baseline_comparison(
+        corpus,
+        "keyboard",
+        {"alice": ["2026-01-06"], "bob": ["2026-01-06"]},
+        _ml_config(),
+        model_types=("isolation_forest",),
+    )
+    assert "isolation_forest" in results
+    assert "alice" not in results["isolation_forest"].excluded_users

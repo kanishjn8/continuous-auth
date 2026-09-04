@@ -21,6 +21,7 @@ from ml.evaluation.splitting import DaySplit, day_disjoint_split, enrollment_len
 from ml.features.config import MLConfig
 from ml.features.schema import FeatureWindow, QualityLabel
 from ml.training.common import InsufficientDataError, Modality, ModelArtifact, score_window
+from ml.training.enrollment import EnrollmentAdmission
 from ml.training.isolation_forest import train_user_modality_isolation_forest
 from ml.training.single_fused_model import score_single_fused_window, train_user_single_fused_model
 
@@ -56,10 +57,14 @@ def run_baseline_comparison(
     config: MLConfig,
     *,
     model_types: Sequence[str] = ("isolation_forest", "mahalanobis_centroid", "one_class_svm"),
+    admission: EnrollmentAdmission | None = None,
 ) -> dict[str, ModelComparisonResult]:
     """Run the required baseline comparison (PLAN.md Section 10.4): identical
     day-disjoint splits, identical feature set, identical calibration
     procedure, for every model type in ``model_types``.
+
+    ``admission`` admits a first profile's participant data per ADR-013;
+    leave it ``None`` for synthetic, public, or already-promoted data.
     """
     results: dict[str, ModelComparisonResult] = {}
 
@@ -80,7 +85,7 @@ def run_baseline_comparison(
                 excluded[user_id] = str(e)
                 continue
             try:
-                artifact = trainer(user_id, modality, split.train, config)
+                artifact = trainer(user_id, modality, split.train, config, enrollment_admission=admission)
             except InsufficientDataError as e:
                 excluded[user_id] = str(e)
                 continue
@@ -343,11 +348,15 @@ def run_fusion_vs_single_model_comparison(
     w_kbd: float = 0.5,
     w_mouse: float = 0.5,
     anomaly_threshold: float = 50.0,
+    admission: EnrollmentAdmission | None = None,
 ) -> FusionVsSingleModelResult:
     """Run the ADR-006 confirmation-criterion comparison against real
     trained artifacts: dual-model score fusion (``ml.evaluation.fusion``)
     vs the single fused-vector model (``ml.training.single_fused_model``),
     on the same day-disjoint split, per user.
+
+    ``admission`` admits a first profile's participant data per ADR-013;
+    leave it ``None`` for synthetic, public, or already-promoted data.
     """
     kbd_artifacts: dict[str, ModelArtifact] = {}
     mouse_artifacts: dict[str, ModelArtifact] = {}
@@ -369,10 +378,10 @@ def run_fusion_vs_single_model_comparison(
 
         try:
             kbd_artifacts[user_id] = train_user_modality_isolation_forest(
-                user_id, "keyboard", split.train, config
+                user_id, "keyboard", split.train, config, enrollment_admission=admission
             )
             mouse_artifacts[user_id] = train_user_modality_isolation_forest(
-                user_id, "mouse", split.train, config
+                user_id, "mouse", split.train, config, enrollment_admission=admission
             )
         except InsufficientDataError as e:
             excluded[user_id] = str(e)
@@ -381,7 +390,9 @@ def run_fusion_vs_single_model_comparison(
         test_windows_by_user[user_id] = split.test
 
         try:
-            single_artifacts[user_id] = train_user_single_fused_model(user_id, split.train, config)
+            single_artifacts[user_id] = train_user_single_fused_model(
+                user_id, split.train, config, enrollment_admission=admission
+            )
         except InsufficientDataError as e:
             # The single fused-vector model trains only on FULL windows
             # (both modalities present) -- it can independently run short
@@ -486,11 +497,15 @@ def run_enrollment_length_experiment(
     holdout_days: Sequence[str],
     config: MLConfig,
     impostor_windows: list[FeatureWindow] | None = None,
+    admission: EnrollmentAdmission | None = None,
 ) -> dict[int, dict[str, object]]:
     """PLAN.md Section 10.5: train on 1/2/3/5/7+ days, evaluate against a
     held-out partition held constant across all lengths, report FAR/FRR/EER
     (when impostor windows are supplied) or a genuine-only FRR diagnostic
     otherwise, per enrollment length.
+
+    ``admission`` admits a first profile's participant data per ADR-013;
+    leave it ``None`` for synthetic, public, or already-promoted data.
     """
     subsets = enrollment_length_subsets(windows, day_lengths=day_lengths, holdout_days=holdout_days)
     holdout_set = set(holdout_days)
@@ -502,7 +517,7 @@ def run_enrollment_length_experiment(
     for n_days, train_windows in subsets.items():
         try:
             artifact = train_user_modality_isolation_forest(
-                user_id, modality, train_windows, config
+                user_id, modality, train_windows, config, enrollment_admission=admission
             )
         except InsufficientDataError as e:
             results[n_days] = {"status": "insufficient_data", "reason": str(e)}
