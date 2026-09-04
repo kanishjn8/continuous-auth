@@ -21,8 +21,10 @@ Your data is written to `%LOCALAPPDATA%\ContinuousAuthentication\Pilot`, kept
 completely separate from the old synthetic test data.
 
 > One caveat, for Manas rather than participants: collected `PILOT` data is stored and
-> is evaluation-eligible, but *training a model on it* additionally requires the Model
-> Update Manager promotion gate. See the note at the end of this guide.
+> is evaluation-eligible, but *training a model on it* additionally requires passing
+> through an admission gate — the ADR-013 enrollment gate for a participant's first
+> profile, the Model Update Manager promotion gate for every update after that. See
+> the note at the end of this guide.
 
 ---
 
@@ -354,22 +356,49 @@ up slightly wrong for five days is five days wasted.
 
 ---
 
-## Note for Manas: the promotion gate
+## Note for Manas: how a profile gets trained
 
 Collected `PILOT` data is stored correctly, is readable by the collection tooling, and
 passes the `eligible_provenance: [TEAM, PILOT]` check, so freezing a corpus works.
 
-Training a model on it is a separate gate. `ml/training/gate.py` accepts `SYNTHETIC` and
-`PUBLIC` windows freely, but every `TEAM`/`PILOT` segment must carry a promoted
-`UpdateCandidate` with all six Model Update Manager gates passed — and
-`ml/evaluation/pipeline.py` never passes `promoted_candidates`, so it will raise
-`PromotionGateRequiredError` on real data.
+Training a model on it goes through one of two reviewed boundaries — never neither,
+never both (`ml/training/common.py` raises either way). Which one applies depends on
+whether the participant already has an active profile:
 
-This is deliberate (AGENTS.md constraint 6 forbids training data that bypasses the
-gate, and a guardrail enforces it), so it must not be worked around. Two of the gates
-are also time-based — `quarantine_days: 7` and `retraining_cadence_days: 7` in
-`config/updates.development.yaml` — which is longer than a five-day collection round.
+- **First profile for a participant:** ADR-013 (accepted 2026-09-03) added a dedicated
+  enrollment admission gate for exactly this case —
+  `ml/training/enrollment.py::require_enrollment_admission`. Gate G3 of the promotion
+  gate counts scored windows, which requires an existing model to score against, so a
+  first profile could never satisfy it; the enrollment gate uses different evidence
+  instead: eligible provenance, active consent, a recorded enrollment, membership of a
+  checksum-verified freeze manifest, a recorded observation time per window, the
+  configured minimum windows and distinct days, and — critically — no existing active
+  profile for that participant. `python -m tools.enrollment activate` runs this end to
+  end from the frozen corpus: it trains on the TRAIN partition, measures FRR on the
+  held-out VALIDATION partition and FAR by zero-effort cross-evaluation against other
+  participants, and activates the profile. The EVALUATION partition is never touched
+  by this step — it stays reserved for the headline result.
+- **Every update after that:** `ml/training/gate.py`'s six-gate promotion gate (G1-G6)
+  is unchanged and still governs it. Every `TEAM`/`PILOT` segment must carry a
+  promoted `UpdateCandidate` with all six gates passed; `python -m tools.updates run`
+  performs one scheduled update cycle over the frozen corpus through that same gate.
 
-Decide how to handle this before the analysis step: either run the promotion workflow
-so segments carry real evidence, or change those cadence values deliberately and record
-that you did. Collection itself is unaffected — start collecting now either way.
+`quarantine_days: 7` and `retraining_cadence_days: 7` in
+`config/updates.development.yaml` are unchanged and are longer than a five-day
+collection round, so a five-day round produces no live *promotion* by design — only
+the first-profile enrollment above is available that early. In practice: do not
+schedule the first update run earlier than **day 12** of a collection round, so that
+every day collected has cleared the 7-day quarantine before that run executes.
+
+Two things this does *not* resolve yet, so do not claim otherwise:
+
+- **E1 (drift benefit) and E2 (poisoning resistance)** are implemented
+  (`python -m tools.experiments e1|e2`) but have only been run against synthetic
+  fixtures so far. Neither is evidence until run on the frozen eligible corpus with
+  the evaluation freeze verified — both remain pending.
+- **The runtime configuration is still development-only.** `config/updates.development.yaml`
+  and the other five runtime loaders (`api`, `decisions`, `risk`, `risk` context,
+  `runtime`) all require `development_only: true` and are not yet approved for pilot
+  use. Only the storage and collection profiles have been reviewed. The synthetic path
+  through the demo bootstrap script remains supported as an explicit opt-in for
+  development — this does not replace it.
