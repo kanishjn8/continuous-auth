@@ -248,7 +248,12 @@ def _admit_training_data(
             "promoted_candidates and enrollment_admission are mutually exclusive"
         )
     if enrollment_admission is not None:
-        if all(window.provenance in _DEVELOPMENT_PROVENANCE for window in windows):
+        # ``all(...)`` over an empty sequence is vacuously True -- guard on
+        # ``windows`` explicitly so an empty window set falls through to
+        # ``require_enrollment_admission`` below (which reports the accurate
+        # INSUFFICIENT_WINDOWS reason) rather than being misreported here as
+        # "all windows are synthetic/public", which is false of an empty set.
+        if windows and all(window.provenance in _DEVELOPMENT_PROVENANCE for window in windows):
             raise ValueError(
                 "enrollment admission is for participant data; synthetic and "
                 "public windows require no admission boundary"

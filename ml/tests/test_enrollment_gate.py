@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -24,6 +25,18 @@ from tools.collection.config import load_collection_settings
 from tools.collection.eligibility import ConsentRecord, EnrollmentRecord
 
 CONSENTED = datetime(2026, 9, 1, 8, 0, tzinfo=UTC)
+
+# SHA-256 of ml/training/gate.py's contents (line endings normalised to LF
+# first, so a Windows CRLF checkout hashes identically to a Unix one).
+# Recorded here so test_promotion_gate_source_is_unmodified below can detect
+# ANY change to the promotion gate's source, not just the disappearance of
+# specific tokens. Changing ml/training/gate.py for any reason -- including
+# this project's own ADR-013 enrollment-admission work, which must add a
+# separate boundary rather than touch this one -- requires deliberately
+# recomputing this constant and updating it here, which is the point: it
+# forces a human to notice and review the diff rather than letting the gate
+# drift silently (e.g. ``all(...)`` quietly becoming ``any(...)``).
+_GATE_PY_SHA256 = "b2bea8dbe52d9eb560f936881d0ac38a1e9b1a3bfae87258cff96ec3889a5bee"
 
 
 def make_window(
@@ -108,6 +121,7 @@ def _admission(windows, **overrides):
         min_windows=20,
         min_distinct_days=3,
         user_has_active_profile=False,
+        participant_id="participant-01",
     )
     defaults.update(overrides)
     return EnrollmentAdmission(**defaults)
@@ -209,6 +223,22 @@ def test_a_user_with_an_active_profile_is_refused() -> None:
         )
 
 
+def test_an_admission_bound_to_another_participant_is_refused() -> None:
+    """One ``EnrollmentAdmission`` must never be reusable across participants.
+
+    A caller that loops over multiple users but forwards the same admission
+    object to every trainer call (e.g. ``ml.evaluation.pipeline``) must be
+    refused explicitly rather than relying on an incidental mismatch (e.g. a
+    consent lookup) to fail first.
+    """
+
+    windows = _windows()
+    with pytest.raises(EnrollmentAdmissionError, match="PARTICIPANT_MISMATCH"):
+        require_enrollment_admission(
+            "participant-02", windows, _admission(windows, participant_id="participant-01")
+        )
+
+
 def test_adr_013_is_recorded_in_the_plan() -> None:
     """The gate and the decision that authorises it ship together.
 
@@ -239,14 +269,29 @@ def test_adr_013_is_recorded_in_the_plan() -> None:
 
 
 def test_promotion_gate_source_is_unmodified() -> None:
-    """ADR-013 adds a boundary; it does not relax the existing one."""
+    """ADR-013 adds a boundary; it does not relax the existing one.
+
+    Hashes the file's actual contents rather than grepping for token
+    presence -- a grep for "g1_risk" etc. would still pass if, say, the
+    ``all(...)`` in ``require_promotion_gate`` silently became ``any(...)``,
+    which would materially weaken the gate while leaving every token this
+    test used to check for still present. Line endings are normalised to LF
+    before hashing so this does not spuriously fail on a Windows CRLF
+    checkout. See ``_GATE_PY_SHA256`` above for what to do if
+    ``ml/training/gate.py`` is deliberately, reviewedly changed.
+    """
 
     from pathlib import Path
 
     source = (
         Path(__file__).resolve().parents[2] / "ml" / "training" / "gate.py"
     ).read_text(encoding="utf-8")
-    for gate in ("g1_risk", "g2_verification", "g3_volume", "g4_continuity",
-                 "g5_quarantine", "g6_schedule"):
-        assert gate in source
-    assert "CandidateDisposition.PROMOTED" in source
+    normalized = source.replace("\r\n", "\n")
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    assert digest == _GATE_PY_SHA256, (
+        "ml/training/gate.py's contents changed. This file must not be "
+        "modified as part of unrelated work; if this is a deliberate, "
+        "human-reviewed change to the promotion gate itself, recompute the "
+        "SHA-256 (line endings normalised to LF) and update "
+        "_GATE_PY_SHA256 above."
+    )

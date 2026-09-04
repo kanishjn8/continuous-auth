@@ -35,7 +35,15 @@ class EnrollmentAdmissionError(ValueError):
 
 @dataclass(frozen=True)
 class EnrollmentAdmission:
-    """Every piece of evidence required to admit a user's first profile."""
+    """Every piece of evidence required to admit a user's first profile.
+
+    ``participant_id`` binds this admission object to exactly one
+    participant. A caller that loops over multiple users (e.g.
+    ``ml.evaluation.pipeline``) but forwards the same ``EnrollmentAdmission``
+    instance to every trainer call relies on ``require_enrollment_admission``
+    rejecting a mismatched ``user_id`` rather than on incidental behaviour
+    elsewhere (e.g. a consent-record lookup happening to fail first).
+    """
 
     settings: CollectionSettings
     consent: ConsentRecord | None
@@ -45,6 +53,7 @@ class EnrollmentAdmission:
     min_windows: int
     min_distinct_days: int
     user_has_active_profile: bool
+    participant_id: str
 
 
 def require_enrollment_admission(
@@ -53,6 +62,13 @@ def require_enrollment_admission(
     admission: EnrollmentAdmission,
 ) -> None:
     """Validate that a user's first profile may be trained on these windows."""
+
+    if admission.participant_id != user_id:
+        raise EnrollmentAdmissionError(
+            f"PARTICIPANT_MISMATCH: admission is bound to participant "
+            f"{admission.participant_id!r}, not {user_id!r}; a single "
+            "EnrollmentAdmission must never be reused across participants"
+        )
 
     if admission.user_has_active_profile:
         raise EnrollmentAdmissionError(

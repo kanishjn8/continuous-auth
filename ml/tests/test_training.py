@@ -15,6 +15,7 @@ from ml.training.common import (
     score_window,
     train_one_class_model,
 )
+from ml.training.enrollment import EnrollmentAdmissionError
 from ml.training.gate import PromotionGateRequiredError
 from ml.training.isolation_forest import train_user_modality_isolation_forest, train_user_profile
 from ml.training.model_wrappers import IsolationForestWrapper
@@ -513,3 +514,26 @@ def test_synthetic_windows_still_need_no_boundary() -> None:
         "synthetic-user", "keyboard", _synthetic_windows(), _ml_config()
     )
     assert artifact.user_id == "synthetic-user"
+
+
+def test_empty_windows_with_admission_reports_insufficient_windows() -> None:
+    """An empty window set must not be misreported as "all synthetic/public".
+
+    ``all(... for window in windows)`` is vacuously True over an empty
+    sequence, so before this fix an empty ``windows`` list under a non-None
+    ``enrollment_admission`` raised the "enrollment admission is for
+    participant data; synthetic and public windows require no admission
+    boundary" ``ValueError`` -- a claim that is false of an empty set and
+    misleading about why training was refused. It must instead reach
+    ``require_enrollment_admission``, which reports the accurate
+    INSUFFICIENT_WINDOWS reason.
+    """
+
+    with pytest.raises(EnrollmentAdmissionError, match="INSUFFICIENT_WINDOWS"):
+        train_user_modality_isolation_forest(
+            "participant-01",
+            "keyboard",
+            [],
+            _ml_config(),
+            enrollment_admission=_valid_admission([]),
+        )

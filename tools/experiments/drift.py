@@ -42,7 +42,7 @@ from backend.app.updates.manager import (
 )
 from backend.app.updates.repository import SQLiteUpdateRepository
 from ml.evaluation.cross_evaluation import zero_effort_cross_evaluation
-from ml.evaluation.metrics import compute_eer
+from ml.evaluation.metrics import compute_eer, compute_far_frr
 from ml.experiments.update_manager import DriftBenefitResult, evaluate_drift_benefit
 from ml.features.config import MLConfig
 from ml.features.schema import FeatureWindow
@@ -107,6 +107,50 @@ def _pooled_percentile_scores(
         genuine.extend(result.genuine_scores)
         impostor.extend(result.all_impostor_scores().tolist())
     return np.asarray(genuine, dtype=float), np.asarray(impostor, dtype=float)
+
+
+def _measure_frozen_profile_metrics(
+    user_id: str,
+    frozen_profile: dict[str, object],
+    validation_windows_by_user: dict[str, list[FeatureWindow]],
+) -> ValidationMetrics:
+    """Measure the frozen profile's FRR/FAR on VALIDATION -- never fabricated.
+
+    Mirrors ``tools.enrollment.activate._measure_validation_metrics`` exactly:
+    FRR is the fraction of the participant's own held-out VALIDATION windows
+    the frozen profile rejects; FAR is the fraction of every other
+    participant's VALIDATION windows the same profile falsely accepts (via
+    ``zero_effort_cross_evaluation``, pooled across modalities the same way
+    ``_pooled_percentile_scores`` is used elsewhere in this module). Both are
+    read off the Equal Error Rate operating point on this pooled VALIDATION
+    evidence -- the same convention ``_risk_threshold_from_validation`` below
+    uses to fix E1's comparison threshold.
+
+    These are real measurements of the frozen profile, not a placeholder. A
+    bare 0.0/0.0 pair here would be indistinguishable from a (fabricated)
+    perfect result -- precisely what ADR-013 and
+    ``tools/enrollment/activate.py`` were written to avoid, and this profile
+    is written to the same ``model_profiles`` table via the same
+    ``activate_profile`` path.
+    """
+
+    genuine_windows = validation_windows_by_user.get(user_id, [])
+    other_windows = {uid: w for uid, w in validation_windows_by_user.items() if uid != user_id}
+    genuine, impostor = _pooled_percentile_scores(
+        user_id, frozen_profile, genuine_windows, other_windows
+    )
+    if len(genuine) == 0 or len(impostor) == 0:
+        raise ValueError(
+            "E1 could not measure the frozen profile's VALIDATION metrics: no "
+            "genuine and/or impostor VALIDATION-partition scores were "
+            f"available for user {user_id!r}"
+        )
+    eer = compute_eer(genuine, impostor)
+    rates = compute_far_frr(genuine, impostor, eer.threshold)
+    return ValidationMetrics(
+        false_rejection_rate=rates.frr,
+        false_acceptance_rate=rates.far,
+    )
 
 
 def _risk_threshold_from_validation(
@@ -219,6 +263,7 @@ def run_drift_benefit(
         min_windows=risk_settings.enrollment.min_windows,
         min_distinct_days=risk_settings.enrollment.min_distinct_days,
         user_has_active_profile=_has_active_profile(storage, user_id),
+        participant_id=user_id,
     )
     frozen_profile = train_user_profile(
         user_id, early_windows, ml_config, enrollment_admission=admission
@@ -239,7 +284,9 @@ def run_drift_benefit(
         save_artifact(frozen_mouse, artifact_root / user_id / f"{frozen_mouse.version}.joblib")
 
     frozen_profile_version = "e1-frozen-profile"
-    zero_metrics = ValidationMetrics(false_rejection_rate=0.0, false_acceptance_rate=0.0)
+    frozen_metrics = _measure_frozen_profile_metrics(
+        user_id, frozen_profile, validation_corpus.windows_by_user
+    )
     frozen_model_profile = ModelProfile(
         profile_version=frozen_profile_version,
         user_id=user_id,
@@ -251,8 +298,13 @@ def run_drift_benefit(
         validation=ValidationReport(
             accepted=True,
             code="E1_FROZEN_PROFILE_NO_BASELINE",
-            baseline=zero_metrics,
-            candidate=zero_metrics,
+            # No prior profile exists to regress against -- this is E1's
+            # first ("frozen") profile for this user -- but
+            # ValidationReport.baseline is structurally required, so the
+            # same measured VALIDATION metrics are used for both baseline
+            # and candidate. Same pattern as tools/enrollment/activate.py.
+            baseline=frozen_metrics,
+            candidate=frozen_metrics,
         ),
         created_at=_SEGMENT_COMPLETED_AT,
     )

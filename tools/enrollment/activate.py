@@ -187,6 +187,7 @@ def activate_first_profile(
         min_windows=risk_settings.enrollment.min_windows,
         min_distinct_days=risk_settings.enrollment.min_distinct_days,
         user_has_active_profile=has_active_profile,
+        participant_id=participant_id,
     )
 
     train_windows = train_corpus.windows_by_user.get(participant_id, [])
@@ -228,6 +229,12 @@ def activate_first_profile(
         validation=ValidationReport(
             accepted=True,
             code="ENROLLMENT_INITIAL_PROFILE_NO_BASELINE",
+            # ValidationReport.baseline is structurally required, but there
+            # is no prior profile for this participant to regress against --
+            # this is their first profile. The same measured VALIDATION
+            # metrics are therefore used for both baseline and candidate;
+            # the "_NO_BASELINE" reason code says so explicitly so this is
+            # never mistaken for a real prior-vs-candidate regression check.
             baseline=metrics,
             candidate=metrics,
         ),
