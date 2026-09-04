@@ -44,9 +44,7 @@ def _session_windows(
     mouse_events = [mouse_move(i, i * step, 100 + i, 100 + i) for i in range(span_us // step)]
     slice_us = span_us // len(apps)
     context = [
-        ContextEvent(
-            t_capture_us=index * slice_us, app_id=app_id, category=category, seq=index
-        )
+        ContextEvent(t_capture_us=index * slice_us, app_id=app_id, category=category, seq=index)
         for index, (app_id, category) in enumerate(apps)
     ]
     return extract_windows(

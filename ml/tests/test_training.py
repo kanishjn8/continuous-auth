@@ -475,9 +475,7 @@ def test_pilot_windows_with_neither_boundary_still_raise() -> None:
 
     windows = _pilot_windows()
     with pytest.raises(PromotionGateRequiredError):
-        train_user_modality_isolation_forest(
-            "participant-01", "keyboard", windows, _ml_config()
-        )
+        train_user_modality_isolation_forest("participant-01", "keyboard", windows, _ml_config())
 
 
 def test_pilot_windows_with_both_boundaries_are_rejected() -> None:

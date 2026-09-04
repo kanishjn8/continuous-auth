@@ -76,8 +76,8 @@ def _insert_participant(
         (user_id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
     )
     connection.execute(
-        "INSERT INTO sessions(session_id, user_id, entry_auth_evidence, started_at_utc, schema_version) "
-        "VALUES (?, ?, 'A1_LOGIN_UNLOCK', '2026-01-01T00:00:00Z', '1.0.0')",
+        "INSERT INTO sessions(session_id, user_id, entry_auth_evidence, started_at_utc, "
+        "schema_version) VALUES (?, ?, 'A1_LOGIN_UNLOCK', '2026-01-01T00:00:00Z', '1.0.0')",
         (session_id, user_id),
     )
     connection.execute(
@@ -87,7 +87,9 @@ def _insert_participant(
     )
 
 
-def _insert_window(connection: sqlite3.Connection, window: FeatureWindow, *, stored_at_utc: str) -> None:
+def _insert_window(
+    connection: sqlite3.Connection, window: FeatureWindow, *, stored_at_utc: str
+) -> None:
     connection.execute(
         """
         INSERT INTO feature_windows(
@@ -109,12 +111,16 @@ def _insert_window(connection: sqlite3.Connection, window: FeatureWindow, *, sto
             window.mouse_event_count,
             window.collection_day,
             window.provenance.value,
-            None
-            if window.keyboard_features is None
-            else json.dumps(window.keyboard_features.model_dump(mode="json")),
-            None
-            if window.mouse_features is None
-            else json.dumps(window.mouse_features.model_dump(mode="json")),
+            (
+                None
+                if window.keyboard_features is None
+                else json.dumps(window.keyboard_features.model_dump(mode="json"))
+            ),
+            (
+                None
+                if window.mouse_features is None
+                else json.dumps(window.mouse_features.model_dump(mode="json"))
+            ),
             json.dumps(window.context.model_dump(mode="json")),
             window.schema_version,
             stored_at_utc,
@@ -142,7 +148,9 @@ def frozen_fixture(tmp_path: Path) -> tuple[Path, Path]:
     db = SQLiteDatabase(database, busy_timeout_ms=5000)
     db.initialise()
     with db.transaction() as connection:
-        _insert_participant(connection, user_id=user_id, session_id=session_id, segment_id=segment_id)
+        _insert_participant(
+            connection, user_id=user_id, session_id=session_id, segment_id=segment_id
+        )
         for index, day in enumerate(days):
             window = _feature_window(
                 user_id=user_id,
@@ -155,7 +163,9 @@ def frozen_fixture(tmp_path: Path) -> tuple[Path, Path]:
 
     windows = load_window_summaries(database)
     consent = ConsentRecord(user_id, "approved-v1", datetime(2026, 1, 1, tzinfo=UTC))
-    enrollment = EnrollmentRecord(user_id, datetime(2026, 1, 1, tzinfo=UTC), "collector-v1", "1.0.0")
+    enrollment = EnrollmentRecord(
+        user_id, datetime(2026, 1, 1, tzinfo=UTC), "collector-v1", "1.0.0"
+    )
     build_freeze(
         windows,
         destination=manifest,

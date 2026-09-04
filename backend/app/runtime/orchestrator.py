@@ -217,9 +217,7 @@ class RuntimeOrchestrator:
         )
         self._session_id = lifecycle.session_id
         if self.anchor_scheduler is not None:
-            self.anchor_scheduler.session_started(
-                session_id=lifecycle.session_id, at=observed
-            )
+            self.anchor_scheduler.session_started(session_id=lifecycle.session_id, at=observed)
         return lifecycle, self._drain_emissions()
 
     def end_session(self, reason: str = "AUTHENTICATED_EXIT") -> tuple[StreamEmission, ...]:
@@ -614,7 +612,10 @@ class RuntimeOrchestrator:
         )
         if outcome.decision is None:
             return
-        if outcome.decision.risk_level == RiskLevel.LOW and outcome.decision.fused_score is not None:
+        if (
+            outcome.decision.risk_level == RiskLevel.LOW
+            and outcome.decision.fused_score is not None
+        ):
             # ADR-008 empirical layer: accumulate this user's own genuine
             # (LOW-risk) score statistics per application so
             # ContextConfidenceLayer can supersede the static bootstrap map

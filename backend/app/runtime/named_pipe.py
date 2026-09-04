@@ -100,7 +100,7 @@ class WindowsNamedPipeServer:
         if self._connected:
             return
         connected = self._kernel32.ConnectNamedPipe(self._handle, None)
-        if not connected and ctypes.get_last_error() != self._ERROR_PIPE_CONNECTED:  # type: ignore[attr-defined]
+        if not connected and ctypes.get_last_error() != self._ERROR_PIPE_CONNECTED:
             raise NamedPipeError("collector connection to named pipe failed")
         self._connected = True
 
@@ -120,7 +120,7 @@ class WindowsNamedPipeServer:
         )
         if succeeded:
             return bytes(buffer.raw[: received.value])
-        error = ctypes.get_last_error()  # type: ignore[attr-defined]
+        error = ctypes.get_last_error()
         if error in {self._ERROR_BROKEN_PIPE, self._ERROR_NO_DATA}:
             self.disconnect()
             return b""

@@ -107,8 +107,7 @@ def require_enrollment_admission(
         )
         if reasons:
             raise EnrollmentAdmissionError(
-                f"{','.join(reasons)}: window {window.window_id!r} is not "
-                "evaluation-eligible"
+                f"{','.join(reasons)}: window {window.window_id!r} is not " "evaluation-eligible"
             )
 
     if len(windows) < admission.min_windows:
@@ -118,6 +117,5 @@ def require_enrollment_admission(
     distinct_days = {window.collection_day for window in windows}
     if len(distinct_days) < admission.min_distinct_days:
         raise EnrollmentAdmissionError(
-            f"INSUFFICIENT_DISTINCT_DAYS: {len(distinct_days)} < "
-            f"{admission.min_distinct_days}"
+            f"INSUFFICIENT_DISTINCT_DAYS: {len(distinct_days)} < " f"{admission.min_distinct_days}"
         )

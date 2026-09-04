@@ -154,9 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ml-config", type=Path, default=ROOT / "config/ml.development.yaml")
     args = parser.parse_args(argv)
 
-    storage = StorageService.open(
-        load_storage_settings(args.storage_config, workspace_root=ROOT)
-    )
+    storage = StorageService.open(load_storage_settings(args.storage_config, workspace_root=ROOT))
 
     with storage.database.connection() as connection:
         existing = connection.execute(

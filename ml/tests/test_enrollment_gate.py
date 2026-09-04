@@ -8,10 +8,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from ml.features.schema import (
+    FEATURE_SCHEMA_VERSION,
     AppCategory,
     ContextBlock,
     DeviceClass,
-    FEATURE_SCHEMA_VERSION,
     FeatureWindow,
     Provenance,
     QualityLabel,
@@ -115,8 +115,7 @@ def _admission(windows, **overrides):
         ),
         manifest_window_ids=frozenset(w.window_id for w in windows),
         observed_at_by_window={
-            w.window_id: CONSENTED + timedelta(hours=index)
-            for index, w in enumerate(windows)
+            w.window_id: CONSENTED + timedelta(hours=index) for index, w in enumerate(windows)
         },
         min_windows=20,
         min_distinct_days=3,
@@ -156,9 +155,7 @@ def test_synthetic_provenance_is_refused() -> None:
 def test_missing_consent_is_refused() -> None:
     windows = _windows()
     with pytest.raises(EnrollmentAdmissionError, match="MISSING_CONSENT"):
-        require_enrollment_admission(
-            "participant-01", windows, _admission(windows, consent=None)
-        )
+        require_enrollment_admission("participant-01", windows, _admission(windows, consent=None))
 
 
 def test_withdrawn_consent_is_refused() -> None:
@@ -283,9 +280,9 @@ def test_promotion_gate_source_is_unmodified() -> None:
 
     from pathlib import Path
 
-    source = (
-        Path(__file__).resolve().parents[2] / "ml" / "training" / "gate.py"
-    ).read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[2] / "ml" / "training" / "gate.py").read_text(
+        encoding="utf-8"
+    )
     normalized = source.replace("\r\n", "\n")
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     assert digest == _GATE_PY_SHA256, (

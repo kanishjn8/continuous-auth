@@ -165,7 +165,9 @@ def test_stored_document_never_contains_the_plaintext_answer() -> None:
 def test_setup_runs_once_and_rotation_requires_the_current_answer() -> None:
     service, _ = _configured()
     with pytest.raises(ChallengeAlreadyConfigured):
-        service.configure(question="New question?", answer="new-answer", confirm_answer="new-answer")
+        service.configure(
+            question="New question?", answer="new-answer", confirm_answer="new-answer"
+        )
     with pytest.raises(InvalidChallengeSetup):
         service.configure(
             question="New question?",
@@ -343,10 +345,12 @@ def test_terminate_never_locks_while_enforcement_is_off() -> None:
 def test_terminate_locks_the_workstation_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr("backend.app.decisions.native.windows_platform", lambda: True)
-    monkeypatch.setattr(
-        "backend.app.decisions.native.lock_workstation",
-        lambda: (calls.append("locked"), True)[1],
-    )
+
+    def _lock_workstation() -> bool:
+        calls.append("locked")
+        return True
+
+    monkeypatch.setattr("backend.app.decisions.native.lock_workstation", _lock_workstation)
     adapter = WindowsLockAdapter(_settings())
     decision = _decision(DecisionAction.TERMINATE)
     result = adapter.execute(ActionRequest(decision, decision.decision_id))

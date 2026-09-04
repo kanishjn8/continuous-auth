@@ -101,8 +101,13 @@ def main() -> None:
         ax_hist, ax_roc = axes[row]
         ax_hist.hist(genuine, bins=20, alpha=0.6, label="genuine", color="tab:blue")
         ax_hist.hist(impostor, bins=20, alpha=0.6, label="impostor", color="tab:red")
-        ax_hist.axvline(eer_result.threshold, color="black", linestyle="--", linewidth=1,
-                         label=f"EER threshold ({eer_result.threshold:.1f})")
+        ax_hist.axvline(
+            eer_result.threshold,
+            color="black",
+            linestyle="--",
+            linewidth=1,
+            label=f"EER threshold ({eer_result.threshold:.1f})",
+        )
         ax_hist.set_title(f"{user_id}: calibrated score distribution")
         ax_hist.set_xlabel("calibrated percentile score (0-100)")
         ax_hist.set_ylabel("window count")
@@ -111,7 +116,10 @@ def main() -> None:
         ax_roc.plot(roc.far, 1 - roc.frr, color="tab:green")
         ax_roc.plot([0, 1], [0, 1], color="gray", linestyle=":", linewidth=1)
         ax_roc.scatter(
-            [eer_result.eer], [1 - eer_result.eer], color="black", zorder=5,
+            [eer_result.eer],
+            [1 - eer_result.eer],
+            color="black",
+            zorder=5,
             label=f"EER = {eer_result.eer:.1%}",
         )
         ax_roc.set_title(f"{user_id}: ROC (window-level)")

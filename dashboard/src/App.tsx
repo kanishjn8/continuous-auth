@@ -151,7 +151,9 @@ export function App() {
   const [view, setView] = useState<View>("overview");
   const [replay, setReplay] = useState(false);
   const [challenge, setChallenge] = useState<ChallengeStatus | null>(null);
-  const [enforcement, setEnforcement] = useState<EnforcementStatus | null>(null);
+  const [enforcement, setEnforcement] = useState<EnforcementStatus | null>(
+    null,
+  );
   const [provenance, setProvenance] = useState<CollectionProvenance | null>(
     null,
   );
@@ -263,8 +265,8 @@ export function App() {
           <p className="challenge-notice" role="status">
             Identity verification in progress ·{" "}
             {enforcement.pending_challenge.action} · answer the prompt on this
-            desktop. This console only reports it; the prompt is the
-            enforcement path.
+            desktop. This console only reports it; the prompt is the enforcement
+            path.
           </p>
         )
       ) : null}

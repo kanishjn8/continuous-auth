@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from backend.app.runtime.cli import _parser
-from backend.app.storage.config import load_storage_settings
+from backend.app.storage.config import StorageSettings, load_storage_settings
 from protocol.generated.python.contracts import (
     DataProvenance,
     StorageDataPolicy,
@@ -19,7 +19,7 @@ PILOT_CONFIG = WORKSPACE / "config" / "storage.pilot.yaml"
 DEVELOPMENT_CONFIG = WORKSPACE / "config" / "storage.development.yaml"
 
 
-def _settings(config: Path, tmp_path: Path):
+def _settings(config: Path, tmp_path: Path) -> StorageSettings:
     return load_storage_settings(
         config,
         workspace_root=WORKSPACE,
@@ -111,7 +111,7 @@ def test_each_store_refuses_the_other_kind_of_data(
 
     settings = _settings(config, tmp_path)
     service = StorageService.__new__(StorageService)
-    service.settings = settings  # type: ignore[misc]
+    service.settings = settings
     with pytest.raises(StorageUnavailableError):
         service._enforce_provenance(rejected)
     service._enforce_provenance(settings.collection_provenance)
@@ -124,9 +124,9 @@ def test_session_entry_evidence_is_not_labelled_synthetic() -> None:
     provenance word baked into it is a data-integrity problem, not cosmetics.
     """
 
-    source = (
-        WORKSPACE / "backend" / "app" / "runtime" / "application.py"
-    ).read_text(encoding="utf-8")
+    source = (WORKSPACE / "backend" / "app" / "runtime" / "application.py").read_text(
+        encoding="utf-8"
+    )
     assert "synthetic-entry-" not in source
     assert "session-entry-" in source
 
@@ -138,9 +138,7 @@ def test_provenance_endpoint_reports_the_active_store(tmp_path: Path) -> None:
     from backend.app.storage.service import StorageService
 
     settings = _settings(PILOT_CONFIG, tmp_path)
-    backend = SQLiteApiBackend(
-        StorageService.open(settings), active_user_provider=lambda: None
-    )
+    backend = SQLiteApiBackend(StorageService.open(settings), active_user_provider=lambda: None)
     reported = backend.collection_provenance()
     assert reported["environment"] == "PILOT"
     assert reported["data_policy"] == "APPROVED_COLLECTION"
@@ -153,7 +151,5 @@ def test_provenance_endpoint_reports_synthetic_for_development(tmp_path: Path) -
     from backend.app.storage.service import StorageService
 
     settings = _settings(DEVELOPMENT_CONFIG, tmp_path)
-    backend = SQLiteApiBackend(
-        StorageService.open(settings), active_user_provider=lambda: None
-    )
+    backend = SQLiteApiBackend(StorageService.open(settings), active_user_provider=lambda: None)
     assert backend.collection_provenance()["collection_provenance"] == "SYNTHETIC"

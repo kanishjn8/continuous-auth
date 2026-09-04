@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -116,9 +117,7 @@ def _backend_with_sink(
         answer_hash_iterations=100_000,
     )
     service = ChallengeService(storage, settings, clock=clock)
-    service.configure(
-        question=QUESTION, answer=SCHEDULED_ANSWER, confirm_answer=SCHEDULED_ANSWER
-    )
+    service.configure(question=QUESTION, answer=SCHEDULED_ANSWER, confirm_answer=SCHEDULED_ANSWER)
     enforcement = EnforcementCoordinator({}, store=_MemoryEnforcementStore())
 
     recorded: list[dict[str, str]] = []
@@ -175,7 +174,7 @@ def sample_decision() -> RiskDecision:
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClient]:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     app = create_runtime_app(
         local_secret=SECRET,
@@ -281,9 +280,7 @@ def test_correct_scheduled_response_records_an_anchor(
     api_backend_with_sink: tuple[SQLiteApiBackend, ChallengeService, list[dict[str, str]]],
 ) -> None:
     backend, service, recorded = api_backend_with_sink
-    pending = service.open_scheduled(
-        user_id="participant-01", session_id="s1", segment_id="seg1"
-    )
+    pending = service.open_scheduled(user_id="participant-01", session_id="s1", segment_id="seg1")
     backend.respond_to_challenge(
         decision_id=pending.decision_id,
         answer=SCHEDULED_ANSWER,
@@ -301,9 +298,7 @@ def test_wrong_scheduled_response_records_no_anchor(
     """A wrong answer must never become a verification anchor."""
 
     backend, service, recorded = api_backend_with_sink
-    pending = service.open_scheduled(
-        user_id="participant-01", session_id="s1", segment_id="seg1"
-    )
+    pending = service.open_scheduled(user_id="participant-01", session_id="s1", segment_id="seg1")
     backend.respond_to_challenge(
         decision_id=pending.decision_id,
         answer="wrong-answer",
@@ -334,9 +329,7 @@ def test_expired_scheduled_response_records_no_anchor(tmp_path: Path) -> None:
     now = datetime(2026, 1, 1, tzinfo=UTC)
     moment = {"value": now}
     backend, service, recorded = _backend_with_sink(tmp_path, clock=lambda: moment["value"])
-    pending = service.open_scheduled(
-        user_id="participant-01", session_id="s1", segment_id="seg1"
-    )
+    pending = service.open_scheduled(user_id="participant-01", session_id="s1", segment_id="seg1")
     moment["value"] = now + timedelta(seconds=121)
     outcome = backend.respond_to_challenge(
         decision_id=pending.decision_id,

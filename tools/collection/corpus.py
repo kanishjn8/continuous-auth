@@ -81,9 +81,7 @@ def load_frozen_corpus(database: Path, manifest: Path, partition: str) -> Frozen
     document: Any = json.loads(manifest.read_text(encoding="utf-8"))
     records = {record["window_id"]: record for record in document["records"]}
     wanted = {
-        window_id
-        for window_id, record in records.items()
-        if record["partition"] == partition
+        window_id for window_id, record in records.items() if record["partition"] == partition
     }
 
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)

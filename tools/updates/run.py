@@ -110,7 +110,9 @@ def _measure_validation_metrics(
     genuine: list[float] = []
     impostor: list[float] = []
     for artifact in profile.values():
-        cross_results = zero_effort_cross_evaluation({user_id: artifact}, validation_windows_by_user)
+        cross_results = zero_effort_cross_evaluation(
+            {user_id: artifact}, validation_windows_by_user
+        )
         result = cross_results.get(user_id)
         if result is None:
             continue
@@ -282,9 +284,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--database", type=Path, required=True)
     run.add_argument("--manifest", type=Path, required=True)
     run.add_argument("--artifact-root", type=Path, required=True)
-    run.add_argument(
-        "--storage-config", type=Path, default=ROOT / "config/storage.pilot.yaml"
-    )
+    run.add_argument("--storage-config", type=Path, default=ROOT / "config/storage.pilot.yaml")
     # No default: see tools/enrollment/activate.py -- there is no approved
     # config/ml.pilot.yaml in this repository, so the operator must name one.
     run.add_argument("--ml-config", type=Path, required=True)

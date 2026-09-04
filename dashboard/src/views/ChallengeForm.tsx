@@ -73,7 +73,9 @@ export function ChallengeForm({
     <form className="challenge-form" onSubmit={submit} noValidate>
       {rotating ? (
         <>
-          <label htmlFor="challenge-current-answer">Current Security Answer</label>
+          <label htmlFor="challenge-current-answer">
+            Current Security Answer
+          </label>
           <input
             id="challenge-current-answer"
             type={ANSWER_INPUT_TYPE}

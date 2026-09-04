@@ -85,7 +85,9 @@ def run_baseline_comparison(
                 excluded[user_id] = str(e)
                 continue
             try:
-                artifact = trainer(user_id, modality, split.train, config, enrollment_admission=admission)
+                artifact = trainer(
+                    user_id, modality, split.train, config, enrollment_admission=admission
+                )
             except InsufficientDataError as e:
                 excluded[user_id] = str(e)
                 continue

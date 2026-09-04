@@ -240,9 +240,7 @@ def run_drift_benefit(
         if partition == "TRAIN"
     )
     if early_train_days is None:
-        early_train_days = max(
-            risk_settings.enrollment.min_distinct_days, len(train_days) // 2
-        )
+        early_train_days = max(risk_settings.enrollment.min_distinct_days, len(train_days) // 2)
     if not (risk_settings.enrollment.min_distinct_days <= early_train_days < len(train_days)):
         raise ValueError(
             f"early_train_days={early_train_days!r} must leave at least one later "
@@ -364,9 +362,7 @@ def run_drift_benefit(
             f"reason={candidate.reason_code!r}"
         )
 
-    scheduled_for = _SEGMENT_COMPLETED_AT + timedelta(
-        days=settings.update_manager.quarantine_days
-    )
+    scheduled_for = _SEGMENT_COMPLETED_AT + timedelta(days=settings.update_manager.quarantine_days)
     outcome = run_update(
         user_id=user_id,
         database=database,

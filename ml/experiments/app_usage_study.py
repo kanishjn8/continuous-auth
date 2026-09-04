@@ -572,7 +572,11 @@ def build_synthetic_corpus(
                     )
                     kbd = [e for e in kbd if e.t_capture_us <= t_start + segment_us]
                     mouse = generate_mouse_stream(
-                        profile, rng, duration_us=segment_us, t_start_us=t_start, seq=seq,
+                        profile,
+                        rng,
+                        duration_us=segment_us,
+                        t_start_us=t_start,
+                        seq=seq,
                         app_id=app_id,
                     )
                     context = [

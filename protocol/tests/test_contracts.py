@@ -335,9 +335,7 @@ def test_openapi_never_returns_a_security_challenge_answer() -> None:
                 continue
             checked += 1
             exposed = {
-                name
-                for name in _property_names(operation.get("responses", {}))
-                if "answer" in name
+                name for name in _property_names(operation.get("responses", {})) if "answer" in name
             }
             assert not exposed, f"{method} {path} response exposes {sorted(exposed)}"
     assert checked == 4

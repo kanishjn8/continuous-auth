@@ -47,8 +47,8 @@ def _insert_participant(
     connection: sqlite3.Connection, *, user_id: str, session_id: str, segment_id: str
 ) -> None:
     connection.execute(
-        "INSERT OR IGNORE INTO users(user_id, state, schema_version, created_at_utc, updated_at_utc) "
-        "VALUES (?, 'ACTIVE', '1.0.0', ?, ?)",
+        "INSERT OR IGNORE INTO users(user_id, state, schema_version, created_at_utc, "
+        "updated_at_utc) VALUES (?, 'ACTIVE', '1.0.0', ?, ?)",
         (user_id, CONSENTED_AT, CONSENTED_AT),
     )
     connection.execute(
@@ -85,12 +85,16 @@ def _insert_window(connection: sqlite3.Connection, window, *, stored_at_utc: str
             window.mouse_event_count,
             window.collection_day,
             window.provenance.value,
-            None
-            if window.keyboard_features is None
-            else json.dumps(window.keyboard_features.model_dump(mode="json")),
-            None
-            if window.mouse_features is None
-            else json.dumps(window.mouse_features.model_dump(mode="json")),
+            (
+                None
+                if window.keyboard_features is None
+                else json.dumps(window.keyboard_features.model_dump(mode="json"))
+            ),
+            (
+                None
+                if window.mouse_features is None
+                else json.dumps(window.mouse_features.model_dump(mode="json"))
+            ),
             json.dumps(window.context.model_dump(mode="json")),
             window.schema_version,
             stored_at_utc,
@@ -108,9 +112,7 @@ def _insert_corpus(database: Path, windows: list) -> None:
                 session_id=window.session_id,
                 segment_id=window.segment_id,
             )
-            _insert_window(
-                connection, window, stored_at_utc=f"{window.collection_day}T00:00:00Z"
-            )
+            _insert_window(connection, window, stored_at_utc=f"{window.collection_day}T00:00:00Z")
 
 
 def _pilot_windows(user_id: str, seed: int):
@@ -183,7 +185,9 @@ def _activate_baseline_profile(
     keyboard_artifact = profile.get("keyboard")
     mouse_artifact = profile.get("mouse")
     if keyboard_artifact is not None:
-        save_artifact(keyboard_artifact, artifact_root / user_id / f"{keyboard_artifact.version}.joblib")
+        save_artifact(
+            keyboard_artifact, artifact_root / user_id / f"{keyboard_artifact.version}.joblib"
+        )
     if mouse_artifact is not None:
         save_artifact(mouse_artifact, artifact_root / user_id / f"{mouse_artifact.version}.joblib")
 

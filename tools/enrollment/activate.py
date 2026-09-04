@@ -258,9 +258,7 @@ def _parser() -> argparse.ArgumentParser:
     activate.add_argument("--manifest", type=Path, required=True)
     activate.add_argument("--administration", type=Path, required=True)
     activate.add_argument("--artifact-root", type=Path, required=True)
-    activate.add_argument(
-        "--storage-config", type=Path, default=ROOT / "config/storage.pilot.yaml"
-    )
+    activate.add_argument("--storage-config", type=Path, default=ROOT / "config/storage.pilot.yaml")
     activate.add_argument(
         "--collection-config", type=Path, default=ROOT / "config/collection.pilot.yaml"
     )

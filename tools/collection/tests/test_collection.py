@@ -194,6 +194,4 @@ def test_development_collection_profile_is_unchanged() -> None:
     root = Path(__file__).resolve().parents[3]
     settings = load_collection_settings(root / "config/collection.development.yaml")
     assert settings.target_collection_days == 7
-    assert settings.eligible_provenance == frozenset(
-        {DataProvenance.TEAM, DataProvenance.PILOT}
-    )
+    assert settings.eligible_provenance == frozenset({DataProvenance.TEAM, DataProvenance.PILOT})

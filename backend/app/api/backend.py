@@ -388,16 +388,18 @@ class SQLiteApiBackend:
             "enforcement_enabled": self.enforcement_settings is not None
             and self.enforcement_settings.enabled,
             "configured": service.is_configured(),
-            "pending_challenge": None
-            if pending is None
-            else {
-                "decision_id": pending.decision_id,
-                "action": pending.action.value,
-                "question": pending.question,
-                "blocking": pending.blocking,
-                "opened_at": pending.opened_at.isoformat().replace("+00:00", "Z"),
-                "expires_at": pending.expires_at.isoformat().replace("+00:00", "Z"),
-            },
+            "pending_challenge": (
+                None
+                if pending is None
+                else {
+                    "decision_id": pending.decision_id,
+                    "action": pending.action.value,
+                    "question": pending.question,
+                    "blocking": pending.blocking,
+                    "opened_at": pending.opened_at.isoformat().replace("+00:00", "Z"),
+                    "expires_at": pending.expires_at.isoformat().replace("+00:00", "Z"),
+                }
+            ),
         }
 
     def collection_provenance(self) -> dict[str, str]:

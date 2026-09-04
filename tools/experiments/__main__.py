@@ -49,7 +49,9 @@ def _common_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run E1 (drift-benefit) or E2 (poisoning-resistance) over the frozen PILOT corpus"
+        description=(
+            "Run E1 (drift-benefit) or E2 (poisoning-resistance) over the frozen PILOT corpus"
+        )
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

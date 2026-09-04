@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 
 def test_a_run_before_quarantine_elapses_promotes_nothing(update_fixture) -> None:

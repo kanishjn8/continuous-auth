@@ -109,7 +109,9 @@ test("every answer field is masked, never plain text", () => {
 
 test("no challenge answer is ever placed in a URL", () => {
   const client = source("api/client.ts");
-  const [, saveChallengeBody = ""] = client.split("export async function saveChallenge");
+  const [, saveChallengeBody = ""] = client.split(
+    "export async function saveChallenge",
+  );
   assert.ok(saveChallengeBody.includes("JSON.stringify"));
   assert.ok(!/\/v1\/enforcement\/challenge[^"]*\$\{/.test(saveChallengeBody));
 });

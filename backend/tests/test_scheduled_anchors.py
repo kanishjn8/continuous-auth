@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import datetime as datetime_module
-from pathlib import Path
-
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Self
 
 import pytest
 
-from backend.app.decisions.adapters import ActionStatus, AdapterResult, EnforcementCoordinator
+from backend.app.decisions.adapters import EnforcementCoordinator
 from backend.app.decisions.challenge import ChallengeService
 from backend.app.decisions.config import EnforcementSettings
 from backend.app.ingestion import IngestionSettings
@@ -197,12 +197,19 @@ def test_starting_a_session_seeds_the_scheduler(tmp_path: Path) -> None:
         session_id="session-1",
     )
     assert orchestrator.anchor_scheduler is not None
-    assert orchestrator.anchor_scheduler.due(
-        session_id=lifecycle.session_id, now=START + timedelta(hours=4)
-    ) is True
-    assert orchestrator.anchor_scheduler.due(
-        session_id=lifecycle.session_id, now=START + timedelta(hours=3)
-    ) is False
+    assert lifecycle.session_id is not None
+    assert (
+        orchestrator.anchor_scheduler.due(
+            session_id=lifecycle.session_id, now=START + timedelta(hours=4)
+        )
+        is True
+    )
+    assert (
+        orchestrator.anchor_scheduler.due(
+            session_id=lifecycle.session_id, now=START + timedelta(hours=3)
+        )
+        is False
+    )
 
 
 def test_check_scheduled_anchor_is_none_without_an_active_session(tmp_path: Path) -> None:
@@ -265,12 +272,14 @@ def test_complete_scheduled_anchor_records_and_resets_the_clock(tmp_path: Path) 
         at=due_at,
     )
 
-    assert orchestrator.anchor_scheduler.due(
-        session_id=session_id, now=due_at + timedelta(hours=3)
-    ) is False
-    assert orchestrator.anchor_scheduler.due(
-        session_id=session_id, now=due_at + timedelta(hours=4)
-    ) is True
+    assert (
+        orchestrator.anchor_scheduler.due(session_id=session_id, now=due_at + timedelta(hours=3))
+        is False
+    )
+    assert (
+        orchestrator.anchor_scheduler.due(session_id=session_id, now=due_at + timedelta(hours=4))
+        is True
+    )
     with orchestrator.storage.database.connection() as connection:
         count = connection.execute(
             "SELECT COUNT(*) FROM verification_anchors WHERE anchor_type = 'A3_SCHEDULED_PROMPT'"
@@ -307,8 +316,8 @@ def test_check_heartbeat_triggers_the_scheduled_anchor_check(
 
     class _FixedDatetime(datetime_module.datetime):
         @classmethod
-        def now(cls, tz=None):  # type: ignore[override]
-            return due_at
+        def now(cls, tz: datetime_module.tzinfo | None = None) -> Self:
+            return due_at  # type: ignore[return-value]
 
     monkeypatch.setattr(orchestrator_module, "datetime", _FixedDatetime)
 
