@@ -13,6 +13,13 @@ class NamedPipeError(RuntimeError):
     pass
 
 
+def _last_error() -> int:
+    # Reached via getattr so this module still type-checks on platforms
+    # where `ctypes.get_last_error` does not exist (see native.py for the
+    # same pattern applied to `ctypes.windll`).
+    return int(getattr(ctypes, "get_last_error")())  # noqa: B009
+
+
 class WindowsNamedPipeServer:
     """Own one local inbound pipe instance used by the native collector client."""
 
@@ -100,7 +107,7 @@ class WindowsNamedPipeServer:
         if self._connected:
             return
         connected = self._kernel32.ConnectNamedPipe(self._handle, None)
-        if not connected and ctypes.get_last_error() != self._ERROR_PIPE_CONNECTED:
+        if not connected and _last_error() != self._ERROR_PIPE_CONNECTED:
             raise NamedPipeError("collector connection to named pipe failed")
         self._connected = True
 
@@ -120,7 +127,7 @@ class WindowsNamedPipeServer:
         )
         if succeeded:
             return bytes(buffer.raw[: received.value])
-        error = ctypes.get_last_error()
+        error = _last_error()
         if error in {self._ERROR_BROKEN_PIPE, self._ERROR_NO_DATA}:
             self.disconnect()
             return b""
