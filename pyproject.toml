@@ -45,6 +45,7 @@ testpaths = [
   "tools/evaluation/tests",
   "tools/faultinjection/tests",
   "tools/synthetic/tests",
+  "tools/updates/tests",
 ]
 
 [tool.ruff]
