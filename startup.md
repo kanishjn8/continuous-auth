@@ -6,13 +6,13 @@ This repository has two supported startup modes:
    Python backend. The ML feature/model packages are installed and validated in the
    backend container because the ML engine is an in-process backend component, not a
    separate network service.
-2. **Full Windows-native application** starts the dashboard, backend, in-process ML
-   engine, and native event collector as one working event pipeline.
+2. **Full desktop application** starts the dashboard, backend, in-process ML engine,
+   and the native Windows or macOS event collector as one working event pipeline.
 
-The native collector must run on the monitored Windows desktop. A Linux container
-cannot install Windows global input hooks or connect through the implemented local
-Windows named-pipe boundary. Compose therefore does not start the collector and must
-not be treated as a participant-collection deployment.
+The native collector must run on the monitored desktop. It selects Windows named pipes
+and low-level hooks on Windows, or a private Unix socket and listen-only event tap on
+macOS. Compose does not start the collector and must not be treated as a
+participant-collection deployment.
 
 ## 1. Prerequisites
 
@@ -29,6 +29,12 @@ For the complete application on Windows:
 - CMake 3.20 or newer.
 - Visual Studio Build Tools with the C++ desktop workload.
 - Permission to install global keyboard and mouse hooks on the machine.
+
+For the complete application on macOS:
+
+- macOS with Xcode command-line tools.
+- Python 3.11 or newer, Node.js 22, npm, and CMake 3.20 or newer.
+- Input Monitoring permission for the terminal or stable collector executable.
 
 Run all commands from the repository root.
 
@@ -231,7 +237,81 @@ current state and does not create an anomaly.
 Remove-Item Env:CA_DASHBOARD_SECRET
 ```
 
-## 4. Troubleshooting
+## 4. Start the complete application on macOS
+
+The ordering is the same as Windows; the runtime selects macOS implementations from
+`sys.platform`, while the collector selects them from `__APPLE__` at build time.
+
+### Step 1: build the application
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[backend]"
+
+cd dashboard
+npm ci
+npm run typecheck
+npm test
+npm run build
+cd ..
+
+cmake -S collector -B build/collector -DBUILD_TESTING=ON
+cmake --build build/collector
+ctest --test-dir build/collector --output-on-failure
+```
+
+### Step 2: grant native input permission
+
+In **System Settings → Privacy & Security → Input Monitoring**, enable the terminal used
+to start the collector, then restart that terminal. A denied permission causes a loud
+startup failure; the collector never silently runs with zero capture confidence.
+
+### Step 3: start the backend and collector
+
+In the backend terminal:
+
+```bash
+runtime_root="$HOME/Library/Application Support/ContinuousAuthentication"
+artifact_root="$runtime_root/models"
+mkdir -p "$artifact_root"
+chmod 700 "$runtime_root" "$artifact_root"
+read -s CA_DASHBOARD_SECRET
+export CA_DASHBOARD_SECRET
+
+python -m backend.app.runtime.cli \
+  --participant-id <pseudonym> \
+  --artifact-root "$artifact_root" \
+  --dashboard-directory dashboard/dist
+```
+
+macOS automatically selects `config/storage.macos.pilot.yaml`. For a disposable
+synthetic run, explicitly pass `--storage-config
+config/storage.macos.development.yaml`.
+
+In the collector terminal:
+
+```bash
+./build/collector/continuous_auth_collector \
+  --config config/collector.development.yaml \
+  --categories config/app_categories.yaml
+```
+
+The backend owns a mode-`0600` Unix socket beneath a mode-`0700` per-user runtime
+directory. Start either process first: the collector uses the same bounded reconnect
+logic as Windows. Participant pause/resume also selects the macOS signal automatically:
+
+```bash
+python -m tools.collection --config config/collection.pilot.yaml pause \
+  --event-name continuous-auth-pause-v1
+python -m tools.collection --config config/collection.pilot.yaml resume \
+  --event-name continuous-auth-pause-v1
+```
+
+Press `Ctrl+C` in both terminals for clean shutdown.
+
+## 5. Troubleshooting
 
 ### Dashboard is offline or login fails
 
@@ -247,11 +327,11 @@ Remove-Item Env:CA_DASHBOARD_SECRET
   `config/collector.development.yaml`.
 - Confirm both processes run in the same Windows user session.
 
-### Backend reports `production named-pipe ingestion requires Windows`
+### Backend reports that the collector transport is unsupported
 
-The full integrated runtime was started on macOS, Linux, WSL, or in a Linux container.
-Run the complete pipeline directly on Windows. Use Compose only for dashboard/API
-development.
+The full integrated runtime was started on Linux, WSL, or another unsupported host.
+Run the complete pipeline directly on Windows or macOS. Use Compose only for
+dashboard/API development.
 
 ### Model is missing or rejected
 
@@ -267,7 +347,7 @@ it. Development storage lives under
 `%LOCALAPPDATA%\ContinuousAuthentication\Development`; participant data must never be
 used with the supplied synthetic-only configuration.
 
-## 5. Pre-handoff verification
+## 6. Pre-handoff verification
 
 Before handing off a startup or deployment change, run:
 

@@ -1,0 +1,19 @@
+# Approved-collection macOS profile. This provisions storage; it does not grant consent.
+config_version: storage-macos-pilot-1
+protocol_version: 1.0.0
+
+storage:
+  environment: PILOT
+  data_policy: APPROVED_COLLECTION
+  root_directory: "${HOME}/Library/Application Support/ContinuousAuthentication/Pilot"
+  database_filename: continuous-auth.db
+  audit_directory_name: audit
+  busy_timeout_ms: 5000
+
+retention:
+  feature_window_days: 120
+  score_days: 120
+  audit_compress_after_days: 7
+  audit_delete_after_days: 120
+  raw_debug_capture_enabled: false
+  pilot_mode: true

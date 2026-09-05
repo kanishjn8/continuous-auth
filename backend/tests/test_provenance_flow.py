@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.app.runtime.cli import _parser
+from backend.app.runtime.cli import _default_storage_config, _parser
 from backend.app.storage.config import StorageSettings, load_storage_settings
 from protocol.generated.python.contracts import (
     DataProvenance,
@@ -17,6 +17,8 @@ from protocol.generated.python.contracts import (
 WORKSPACE = Path(__file__).resolve().parents[2]
 PILOT_CONFIG = WORKSPACE / "config" / "storage.pilot.yaml"
 DEVELOPMENT_CONFIG = WORKSPACE / "config" / "storage.development.yaml"
+MACOS_PILOT_CONFIG = WORKSPACE / "config" / "storage.macos.pilot.yaml"
+MACOS_DEVELOPMENT_CONFIG = WORKSPACE / "config" / "storage.macos.development.yaml"
 
 
 def _settings(config: Path, tmp_path: Path) -> StorageSettings:
@@ -69,8 +71,26 @@ def test_a_normal_run_defaults_to_the_pilot_profile() -> None:
     arguments = _parser().parse_args(
         ["--participant-id", "participant-01", "--artifact-root", "models"]
     )
-    assert arguments.storage_config.name == "storage.pilot.yaml"
+    assert arguments.storage_config == _default_storage_config()
     assert arguments.participant_id == "participant-01"
+
+
+def test_storage_default_is_selected_by_platform() -> None:
+    assert _default_storage_config("win32").name == "storage.pilot.yaml"
+    assert _default_storage_config("darwin").name == "storage.macos.pilot.yaml"
+
+
+def test_macos_profiles_keep_pilot_and_synthetic_data_separate(tmp_path: Path) -> None:
+    environment = {"HOME": str(tmp_path)}
+    pilot = load_storage_settings(
+        MACOS_PILOT_CONFIG, workspace_root=WORKSPACE, environment=environment
+    )
+    development = load_storage_settings(
+        MACOS_DEVELOPMENT_CONFIG, workspace_root=WORKSPACE, environment=environment
+    )
+    assert pilot.collection_provenance is DataProvenance.PILOT
+    assert development.collection_provenance is DataProvenance.SYNTHETIC
+    assert pilot.root_directory != development.root_directory
 
 
 def test_the_previous_flag_name_still_works() -> None:

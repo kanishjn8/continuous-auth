@@ -1,4 +1,4 @@
-"""Windows-native enforcement: the always-on-top prompt and the real lock.
+"""Platform-native enforcement: the always-on-top prompt and workstation lock.
 
 PLAN.md Section 5.2 states the dashboard must not be the only enforcement
 path, and Section 14.1 names the threat as hijack of an unlocked workstation.
@@ -10,8 +10,8 @@ Two guards apply to every action here:
 
 * ``EnforcementSettings.enabled`` is false by default, so ordinary collection
   and calibration never lock a participant out on a false positive.
-* Nothing Windows-specific is attempted off Windows. A Linux container cannot
-  lock the Windows host or draw on its desktop, so those paths report
+* Nothing desktop-specific is attempted on an unsupported host. A Linux container cannot
+  lock the desktop host or draw on its session, so those paths report
   ``SKIPPED`` rather than failing.
 
 Dispatch is always non-blocking: the prompt runs in its own process and the
@@ -35,27 +35,52 @@ from .config import EnforcementSettings
 LOGGER = logging.getLogger(__name__)
 
 PROMPT_MODULE = "backend.app.decisions.prompt"
+MACOS_LOCK_EXECUTABLE = "/usr/bin/osascript"
+MACOS_LOCK_SCRIPT = (
+    'tell application "System Events" to keystroke "q" ' "using {control down, command down}"
+)
 
 
 def windows_platform() -> bool:
     return sys.platform == "win32"
 
 
+def macos_platform() -> bool:
+    return sys.platform == "darwin"
+
+
+def native_desktop_platform() -> bool:
+    return windows_platform() or macos_platform()
+
+
 def lock_workstation() -> bool:
-    """Lock the real Windows workstation. Returns False when unavailable."""
+    """Lock the real workstation using the selected host implementation."""
 
-    if not windows_platform():
-        return False
-    try:
-        import ctypes
+    if windows_platform():
+        try:
+            import ctypes
 
-        # Reached via getattr so this module still type-checks on platforms
-        # where `ctypes.windll` does not exist.
-        user32 = getattr(ctypes, "windll").user32  # noqa: B009
-        return bool(user32.LockWorkStation())
-    except (AttributeError, OSError):
-        LOGGER.exception("LockWorkStation call failed")
-        return False
+            # Reached via getattr so this module still type-checks on platforms
+            # where `ctypes.windll` does not exist.
+            user32 = getattr(ctypes, "windll").user32  # noqa: B009
+            return bool(user32.LockWorkStation())
+        except (AttributeError, OSError):
+            LOGGER.exception("Windows workstation lock failed")
+            return False
+    if macos_platform():
+        try:
+            result = subprocess.run(  # noqa: S603 - fixed Apple system executable and argument
+                [MACOS_LOCK_EXECUTABLE, "-e", MACOS_LOCK_SCRIPT],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            return result.returncode == 0
+        except OSError:
+            LOGGER.exception("macOS workstation lock failed")
+            return False
+    return False
 
 
 @dataclass(frozen=True)
@@ -78,7 +103,7 @@ def spawn_prompt(dispatch: PromptDispatch) -> subprocess.Popen[bytes] | None:
     response endpoint.
     """
 
-    if not windows_platform():
+    if not native_desktop_platform():
         return None
     environment = dict(os.environ)
     environment.update(
@@ -136,7 +161,7 @@ class NativeChallengeAdapter:
             return AdapterResult(ActionStatus.SKIPPED, "CHALLENGE_NOT_CONFIGURED")
         if not self._settings.prompt_enabled:
             return AdapterResult(ActionStatus.SKIPPED, "ENFORCEMENT_DISABLED")
-        if not windows_platform():
+        if not native_desktop_platform():
             return AdapterResult(ActionStatus.SKIPPED, "NATIVE_PROMPT_UNSUPPORTED_PLATFORM")
         process = spawn_prompt(
             PromptDispatch(
@@ -153,7 +178,7 @@ class NativeChallengeAdapter:
         return AdapterResult(ActionStatus.SUCCEEDED, "CHALLENGE_DISPATCHED")
 
 
-class WindowsLockAdapter:
+class WorkstationLockAdapter:
     """Lock the real workstation for ``TERMINATE``."""
 
     action = DecisionAction.TERMINATE
@@ -165,8 +190,12 @@ class WindowsLockAdapter:
         del request
         if not self._settings.workstation_lock_enabled:
             return AdapterResult(ActionStatus.SKIPPED, "ENFORCEMENT_DISABLED")
-        if not windows_platform():
+        if not native_desktop_platform():
             return AdapterResult(ActionStatus.SKIPPED, "WORKSTATION_LOCK_UNSUPPORTED_PLATFORM")
         if not lock_workstation():
             return AdapterResult(ActionStatus.FAILED_OPEN, "WORKSTATION_LOCK_FAILED")
         return AdapterResult(ActionStatus.SUCCEEDED, "WORKSTATION_LOCKED")
+
+
+# Backward-compatible public name for existing integrations and tests.
+WindowsLockAdapter = WorkstationLockAdapter

@@ -42,7 +42,7 @@ for synthetic testing. Real category observations and human review are still req
 before an efficacy claim or production policy can be made.
 
 `collector.development.yaml`, `api.development.yaml`, and
-`orchestration.development.yaml` define bounded Windows IPC, loopback authentication,
+`orchestration.development.yaml` define bounded platform-selected local IPC, loopback authentication,
 stream replay, watchdog, and measurement capacities. `updates.development.yaml` holds
 the provisional G3/G5/G6/regression policy. `collection.development.yaml` and
 `evaluation.development.yaml` are operation/statistics placeholders, while

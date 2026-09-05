@@ -1,16 +1,35 @@
-"""Blocking Windows byte-stream named-pipe server behind a small interface."""
+"""Blocking, host-local byte-stream servers behind one runtime interface."""
 
 from __future__ import annotations
 
 import ctypes
+import os
+import socket
+import stat
 import sys
 from collections.abc import Callable
+from contextlib import suppress
 from ctypes import wintypes
-from typing import Any
+from pathlib import Path
+from typing import Any, Protocol
 
 
-class NamedPipeError(RuntimeError):
+class LocalTransportError(RuntimeError):
+    """A content-free local collector transport failure."""
+
+
+class NamedPipeError(LocalTransportError):
     pass
+
+
+class UnixSocketError(LocalTransportError):
+    pass
+
+
+class LocalByteStreamServer(Protocol):
+    def read(self) -> bytes: ...
+
+    def close(self) -> None: ...
 
 
 def _last_error() -> int:
@@ -154,3 +173,166 @@ class WindowsNamedPipeServer:
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         del exc_type, exc, traceback
         self.close()
+
+
+class MacOSUnixSocketServer:
+    """Own a private per-user Unix socket used by the macOS collector."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        read_bytes: int,
+        buffer_bytes: int,
+        runtime_directory: Path | None = None,
+    ) -> None:
+        if not name or "\\" in name or "/" in name:
+            raise ValueError("socket name must be a non-path local identifier")
+        if read_bytes < 1 or buffer_bytes < read_bytes:
+            raise ValueError("socket buffer sizes are invalid")
+        if not hasattr(os, "getuid"):
+            raise UnixSocketError("Unix socket transport requires a POSIX host")
+
+        self.name = name
+        self.read_bytes = read_bytes
+        self.buffer_bytes = buffer_bytes
+        self.runtime_directory = runtime_directory or _macos_runtime_directory()
+        self.socket_path = self.runtime_directory / f"{name}.sock"
+        self._listener: socket.socket | None = None
+        self._connection: socket.socket | None = None
+        self._closed = False
+        self._prepare_runtime_directory()
+        self._open()
+
+    def _prepare_runtime_directory(self) -> None:
+        try:
+            self.runtime_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            metadata = self.runtime_directory.stat()
+            if metadata.st_uid != os.getuid():
+                raise UnixSocketError("collector socket directory is not private")
+            self.runtime_directory.chmod(0o700)
+            if stat.S_IMODE(self.runtime_directory.stat().st_mode) != 0o700:
+                raise UnixSocketError("collector socket directory is not private")
+            encoded = os.fsencode(self.socket_path)
+            if len(encoded) >= 104:
+                raise UnixSocketError("collector socket endpoint is too long")
+        except UnixSocketError:
+            raise
+        except OSError as exc:
+            raise UnixSocketError("collector socket directory is unavailable") from exc
+
+    def _remove_stale_endpoint(self) -> None:
+        try:
+            metadata = self.socket_path.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise UnixSocketError("collector socket endpoint cannot be inspected") from exc
+        if not stat.S_ISSOCK(metadata.st_mode) or metadata.st_uid != os.getuid():
+            raise UnixSocketError("collector socket endpoint is not a private socket")
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.connect(str(self.socket_path))
+        except ConnectionRefusedError:
+            pass
+        except OSError as exc:
+            raise UnixSocketError("collector socket endpoint cannot be checked") from exc
+        else:
+            raise UnixSocketError("collector socket server is already active")
+        finally:
+            probe.close()
+        try:
+            self.socket_path.unlink()
+        except OSError as exc:
+            raise UnixSocketError("stale collector socket cannot be removed") from exc
+
+    def _open(self) -> None:
+        self._remove_stale_endpoint()
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.buffer_bytes)
+            listener.bind(str(self.socket_path))
+            self.socket_path.chmod(0o600)
+            listener.listen(1)
+        except OSError as exc:
+            listener.close()
+            with suppress(OSError):
+                self.socket_path.unlink(missing_ok=True)
+            raise UnixSocketError("collector socket creation failed") from exc
+        self._listener = listener
+
+    def _accept(self) -> None:
+        if self._connection is not None:
+            return
+        if self._closed:
+            return
+        if self._listener is None:
+            raise UnixSocketError("collector socket is closed")
+        try:
+            connection, _ = self._listener.accept()
+            connection.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.buffer_bytes)
+            self._connection = connection
+        except OSError as exc:
+            if self._closed:
+                return
+            raise UnixSocketError("collector socket accept failed") from exc
+
+    def read(self) -> bytes:
+        self._accept()
+        if self._connection is None:
+            return b""
+        try:
+            chunk = self._connection.recv(self.read_bytes)
+        except OSError as exc:
+            if self._closed:
+                return b""
+            self.disconnect()
+            raise UnixSocketError("collector socket read failed") from exc
+        if not chunk:
+            self.disconnect()
+        return chunk
+
+    def disconnect(self) -> None:
+        connection, self._connection = self._connection, None
+        if connection is None:
+            return
+        with suppress(OSError):
+            connection.shutdown(socket.SHUT_RDWR)
+        connection.close()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self.disconnect()
+        listener, self._listener = self._listener, None
+        if listener is not None:
+            with suppress(OSError):
+                listener.shutdown(socket.SHUT_RDWR)
+            listener.close()
+        with suppress(OSError):
+            self.socket_path.unlink(missing_ok=True)
+
+    def __enter__(self) -> MacOSUnixSocketServer:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        del exc_type, exc, traceback
+        self.close()
+
+
+def _macos_runtime_directory() -> Path:
+    return Path("/tmp") / f"continuous-auth-{os.getuid():d}"
+
+
+def make_local_transport_server(
+    name: str,
+    *,
+    read_bytes: int,
+    buffer_bytes: int,
+) -> LocalByteStreamServer:
+    if sys.platform == "win32":
+        return WindowsNamedPipeServer(name, read_bytes=read_bytes, buffer_bytes=buffer_bytes)
+    if sys.platform == "darwin":
+        return MacOSUnixSocketServer(name, read_bytes=read_bytes, buffer_bytes=buffer_bytes)
+    raise LocalTransportError("production collector transport requires Windows or macOS")

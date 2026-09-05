@@ -20,6 +20,8 @@ import { dashboardConfig } from "./config";
 import { useDashboard } from "./hooks/useDashboard";
 import type { RiskDecision, WebSocketEnvelope } from "./protocol";
 import type { DashboardAction } from "./state/dashboard";
+import { persistView, restoreView, views } from "./state/navigation";
+import type { View } from "./state/navigation";
 import { AlertsView } from "./views/AlertsView";
 import { ChallengeSetupView } from "./views/ChallengeSetupView";
 import { HealthView } from "./views/HealthView";
@@ -28,25 +30,6 @@ import { LiveView } from "./views/LiveView";
 import { OverviewView } from "./views/OverviewView";
 import { ProfilesView } from "./views/ProfilesView";
 import { SettingsView } from "./views/SettingsView";
-
-type View =
-  | "overview"
-  | "live"
-  | "alerts"
-  | "history"
-  | "health"
-  | "profiles"
-  | "settings";
-
-const views: readonly { readonly id: View; readonly label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "live", label: "Live" },
-  { id: "alerts", label: "Alerts" },
-  { id: "history", label: "History" },
-  { id: "health", label: "System health" },
-  { id: "profiles", label: "Profiles" },
-  { id: "settings", label: "Settings" },
-];
 
 function replayTrace(dispatch: React.Dispatch<DashboardAction>): () => void {
   dispatch({ type: "REPLAY" });
@@ -148,7 +131,8 @@ function LoginView({
 
 export function App() {
   const [authenticated, setAuthenticated] = useState(true);
-  const [view, setView] = useState<View>("overview");
+  const [view, setView] = useState<View>(() => restoreView());
+  useEffect(() => persistView(view), [view]);
   const [replay, setReplay] = useState(false);
   const [challenge, setChallenge] = useState<ChallengeStatus | null>(null);
   const [enforcement, setEnforcement] = useState<EnforcementStatus | null>(

@@ -41,6 +41,19 @@ jobs:
       - run: cmake --build build/collector --config Release
       - run: ctest --test-dir build/collector -C Release --output-on-failure
 
+  native-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install ".[backend,dev]"
+      - run: python -m pytest backend/tests/test_local_transport.py backend/tests/test_challenge.py backend/tests/test_provenance_flow.py
+      - run: cmake -S collector -B build/collector -DBUILD_TESTING=ON
+      - run: cmake --build build/collector
+      - run: ctest --test-dir build/collector --output-on-failure
+
   dashboard:
     runs-on: ubuntu-latest
     defaults:
@@ -56,4 +69,3 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-

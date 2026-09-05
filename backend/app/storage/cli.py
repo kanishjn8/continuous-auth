@@ -6,12 +6,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from .config import load_storage_settings
+from .config import default_storage_config, load_storage_settings
 from .errors import StorageError
 from .service import StorageService
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_CONFIG = WORKSPACE_ROOT / "config" / "storage.development.yaml"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -21,7 +20,11 @@ def _parser() -> argparse.ArgumentParser:
         choices=("check", "init"),
         help="check validates only; init also creates the private local database",
     )
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=default_storage_config(WORKSPACE_ROOT, profile="development"),
+    )
     return parser
 
 

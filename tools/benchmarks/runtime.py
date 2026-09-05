@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import subprocess
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -129,18 +130,52 @@ def _windows_snapshot(pid: int) -> tuple[float, int]:
         kernel32.CloseHandle(handle)
 
 
+def _macos_cpu_seconds(value: str) -> float:
+    days = 0
+    clock = value
+    if "-" in value:
+        day_text, clock = value.split("-", 1)
+        days = int(day_text)
+    parts = clock.split(":")
+    if len(parts) == 2:
+        hours = "0"
+        minutes, seconds = parts
+    elif len(parts) == 3:
+        hours, minutes, seconds = parts
+    else:
+        raise RuntimeError("macOS benchmark process time is invalid")
+    return days * 86400 + int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def _macos_snapshot(pid: int) -> tuple[float, int]:
+    result = subprocess.run(  # noqa: S603 - fixed system utility; PID is a validated integer
+        ["/bin/ps", "-o", "time=", "-o", "rss=", "-p", str(pid)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    fields = result.stdout.split()
+    if result.returncode != 0 or len(fields) != 2:
+        raise RuntimeError("macOS benchmark process is unavailable")
+    try:
+        return _macos_cpu_seconds(fields[0]), int(fields[1]) * 1024
+    except ValueError as exc:
+        raise RuntimeError("macOS benchmark process sample is invalid") from exc
+
+
 def _snapshot(pid: int) -> tuple[float, int]:
     if platform.system() == "Linux":
         return _linux_snapshot(pid)
     if platform.system() == "Windows":
         return _windows_snapshot(pid)
+    if platform.system() == "Darwin":
+        return _macos_snapshot(pid)
     if pid != os.getpid():
-        raise RuntimeError("external process sampling is implemented for Windows and Linux only")
+        raise RuntimeError("external process sampling is unavailable on this platform")
     import resource
 
     usage = resource.getrusage(resource.RUSAGE_SELF)
-    scale = 1 if platform.system() == "Darwin" else 1024
-    return time.process_time(), int(usage.ru_maxrss * scale)
+    return time.process_time(), int(usage.ru_maxrss * 1024)
 
 
 class ProcessBenchmark:

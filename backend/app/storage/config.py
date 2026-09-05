@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import ValidationError
@@ -25,6 +26,19 @@ _ENVIRONMENT_REFERENCE = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
 _CLOUD_DIRECTORY_NAMES = frozenset(
     {"onedrive", "dropbox", "google drive", "icloud", "icloud drive"}
 )
+
+
+def default_storage_config(
+    workspace_root: Path,
+    *,
+    profile: Literal["pilot", "development"] = "pilot",
+    platform_name: str | None = None,
+) -> Path:
+    """Return the checked-in storage profile matching the current desktop host."""
+
+    selected = sys.platform if platform_name is None else platform_name
+    prefix = "storage.macos" if selected == "darwin" else "storage"
+    return workspace_root / "config" / f"{prefix}.{profile}.yaml"
 
 
 @dataclass(frozen=True)

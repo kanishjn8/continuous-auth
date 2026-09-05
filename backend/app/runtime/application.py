@@ -16,7 +16,7 @@ from backend.app.api.routes import create_api_app
 from backend.app.decisions.adapters import ActionAdapter
 from backend.app.decisions.challenge import ChallengeService
 from backend.app.decisions.config import load_enforcement_settings
-from backend.app.decisions.native import NativeChallengeAdapter, WindowsLockAdapter
+from backend.app.decisions.native import NativeChallengeAdapter, WorkstationLockAdapter
 from backend.app.ingestion.config import load_ingestion_settings
 from backend.app.risk.config import load_risk_settings
 from backend.app.risk.context_config import load_context_config
@@ -31,7 +31,7 @@ from protocol.generated.python.contracts import DecisionAction
 
 from .collector_config import load_collector_config
 from .config import load_orchestration_settings
-from .named_pipe import WindowsNamedPipeServer
+from .named_pipe import make_local_transport_server
 from .orchestrator import RuntimeOrchestrator
 from .profiles import DirectoryProfileProvider
 from .service import IntegratedRuntimeService
@@ -101,7 +101,7 @@ def create_collection_application(
         )
         for action in (DecisionAction.SOFT_CHALLENGE, DecisionAction.REAUTH)
     }
-    enforcement_adapters[DecisionAction.TERMINATE] = WindowsLockAdapter(enforcement_settings)
+    enforcement_adapters[DecisionAction.TERMINATE] = WorkstationLockAdapter(enforcement_settings)
     orchestrator = RuntimeOrchestrator(
         storage=storage,
         ingestion_settings=load_ingestion_settings(ingestion_config),
@@ -136,7 +136,7 @@ def create_collection_application(
         if not (dashboard_directory / "index.html").is_file():
             raise ValueError("dashboard directory does not contain a built index")
         app.mount("/", StaticFiles(directory=dashboard_directory, html=True), name="dashboard")
-    pipe = WindowsNamedPipeServer(
+    pipe = make_local_transport_server(
         collector.pipe_name,
         read_bytes=orchestration.pipe_read_bytes,
         buffer_bytes=orchestration.pipe_buffer_bytes,

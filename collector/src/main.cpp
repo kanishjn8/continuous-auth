@@ -94,6 +94,7 @@ int main(int argc, char** argv) {
   }
   std::signal(SIGINT, request_stop);
   std::signal(SIGTERM, request_stop);
+  std::cout << "[collector] Ready; waiting for keyboard or mouse activity.\n" << std::flush;
 
   const auto started_us = clock.now_us();
   auto next_context_us = started_us;
@@ -107,8 +108,13 @@ int main(int argc, char** argv) {
   const auto heartbeat_period_us = seconds_to_us(settings.heartbeat_interval_seconds);
   std::optional<EventFrame> pending;
   int exit_code = 0;
+  bool capture_confirmed = false;
 
   while (!stop_requested.load(std::memory_order_relaxed)) {
+    if (!capture_confirmed && publisher.input_captured()) {
+      std::cout << "[collector] Events are being captured.\n" << std::flush;
+      capture_confirmed = true;
+    }
     const auto now_us = clock.now_us();
     if (now_us == 0 || publisher.clock_failed()) {
       std::cerr << "capture-time monotonic clock failed\n";

@@ -1,4 +1,4 @@
-"""Run the complete Windows collection stack."""
+"""Run the complete platform-selected desktop collection stack."""
 
 from __future__ import annotations
 
@@ -8,9 +8,15 @@ from pathlib import Path
 
 import uvicorn
 
+from backend.app.storage.config import default_storage_config
+
 from .application import create_collection_application
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def _default_storage_config(platform_name: str | None = None) -> Path:
+    return default_storage_config(ROOT, platform_name=platform_name)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -27,11 +33,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--storage-config",
         type=Path,
-        default=ROOT / "config/storage.pilot.yaml",
+        default=_default_storage_config(),
         help=(
-            "Storage profile, which also determines provenance. The default "
+            "Storage profile, which also determines provenance. The host-selected default "
             "approved-collection profile records real PILOT participant data; pass "
-            "config/storage.development.yaml to record disposable SYNTHETIC data instead."
+            "the matching development profile to record disposable SYNTHETIC data instead."
         ),
     )
     parser.add_argument(

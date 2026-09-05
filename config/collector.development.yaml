@@ -1,4 +1,4 @@
-# T-004/T-005 local development settings. Transport and timing policy is
+# T-004/T-005 local development settings. Platform-selected transport and timing policy is
 # loaded at startup; the hook callback contains no tunable values.
 config_version: t005-windows-development-v1
 protocol_version: 1.0.0

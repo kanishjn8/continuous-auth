@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from ml.features.config import load_config as load_ml_config
 
 from .main import create_runtime_app
+from .storage.config import default_storage_config
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,7 +34,8 @@ def create_app() -> FastAPI:
         local_secret=local_secret,
         active_user_provider=lambda: None,
         storage_config=_configured_path(
-            "CA_STORAGE_CONFIG", WORKSPACE_ROOT / "config/storage.development.yaml"
+            "CA_STORAGE_CONFIG",
+            default_storage_config(WORKSPACE_ROOT, profile="development"),
         ),
         workspace_root=WORKSPACE_ROOT,
         api_config=_configured_path(

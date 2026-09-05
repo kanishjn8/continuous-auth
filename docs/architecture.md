@@ -1,15 +1,15 @@
 # Runtime architecture and privacy boundaries
 
-The Windows collector is the only component that observes native input callbacks. It
+The platform-selected desktop collector is the only component that observes native input callbacks. It
 converts a callback-local platform key identifier immediately to a broad key class and
-only content-free C1 events cross the named-pipe boundary. Ordered events remain in a
+only content-free C1 events cross the private local transport boundary. Ordered events remain in a
 bounded memory ring until the shared feature extractor emits C2 aggregates; raw streams
 are never written to storage.
 
 ```mermaid
 flowchart LR
-  OS["Windows input callbacks"] --> COL["C++ collector<br/>QPC, class conversion, bounded queue"]
-  COL -->|"C1 framed events over local named pipe"| ING["Python ingestion<br/>validation, order, session, segment"]
+  OS["Windows hooks or macOS event tap"] --> COL["C++ collector<br/>native monotonic clock, class conversion, bounded queue"]
+  COL -->|"C1 frames over named pipe or Unix socket"| ING["Python ingestion<br/>validation, order, session, segment"]
   ING --> FEAT["Shared ml/features windowing"]
   FEAT --> MODEL["Per-user keyboard and mouse models"]
   MODEL --> RISK["Context confidence and risk/state policy"]
@@ -22,7 +22,7 @@ flowchart LR
 ```
 
 The dashboard and API are observers, not enforcement dependencies. A dashboard outage
-cannot alter policy or action execution. Collector, pipe, model, storage, and watchdog
+cannot alter policy or action execution. Collector, transport, model, storage, and watchdog
 failures produce availability signals; enforcement remains fail-open, while bounded
 replay/snapshots restore dashboard consistency after reconnect.
 

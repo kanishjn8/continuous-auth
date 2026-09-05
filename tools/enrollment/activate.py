@@ -47,7 +47,7 @@ from pathlib import Path
 import numpy as np
 
 from backend.app.risk.config import RiskSettings, load_risk_settings
-from backend.app.storage.config import load_storage_settings
+from backend.app.storage.config import default_storage_config, load_storage_settings
 from backend.app.storage.service import StorageService
 from backend.app.updates.manager import ModelProfile, ValidationMetrics, ValidationReport
 from backend.app.updates.repository import SQLiteUpdateRepository
@@ -258,7 +258,7 @@ def _parser() -> argparse.ArgumentParser:
     activate.add_argument("--manifest", type=Path, required=True)
     activate.add_argument("--administration", type=Path, required=True)
     activate.add_argument("--artifact-root", type=Path, required=True)
-    activate.add_argument("--storage-config", type=Path, default=ROOT / "config/storage.pilot.yaml")
+    activate.add_argument("--storage-config", type=Path, default=default_storage_config(ROOT))
     activate.add_argument(
         "--collection-config", type=Path, default=ROOT / "config/collection.pilot.yaml"
     )

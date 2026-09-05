@@ -55,6 +55,7 @@ public:
   void set_current_app(std::int64_t value) noexcept;
   std::int64_t current_app() const noexcept;
   bool clock_failed() const noexcept;
+  bool input_captured() const noexcept;
   std::uint64_t dropped() const noexcept;
   std::size_t high_water() const noexcept;
 
@@ -65,6 +66,7 @@ private:
   std::atomic<std::int64_t> current_app_{};
   std::atomic_bool paused_{};
   std::atomic_bool clock_failed_{};
+  std::atomic_bool input_captured_{};
 };
 
 }  // namespace continuous_auth::collector

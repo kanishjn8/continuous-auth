@@ -1,0 +1,19 @@
+# Local macOS synthetic-data profile for development and automated checks only.
+config_version: storage-macos-development-1
+protocol_version: 1.0.0
+
+storage:
+  environment: DEVELOPMENT
+  data_policy: SYNTHETIC_ONLY
+  root_directory: "${HOME}/Library/Application Support/ContinuousAuthentication/Development"
+  database_filename: continuous-auth.db
+  audit_directory_name: audit
+  busy_timeout_ms: 5000
+
+retention:
+  feature_window_days: 7
+  score_days: 7
+  audit_compress_after_days: 1
+  audit_delete_after_days: 7
+  raw_debug_capture_enabled: false
+  pilot_mode: false

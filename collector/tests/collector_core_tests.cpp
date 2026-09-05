@@ -4,11 +4,25 @@
 #include "continuous_auth/collector/context.hpp"
 #include "continuous_auth/collector/frame_encoder.hpp"
 #include "continuous_auth/collector/publisher.hpp"
+#include "continuous_auth/collector/transport.hpp"
 #include "contracts.hpp"
 
 #include <cstdint>
 #include <sstream>
 #include <string>
+
+#if defined(__APPLE__)
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#include <semaphore.h>
+#include <thread>
+#include <vector>
+#endif
 
 namespace {
 
@@ -17,6 +31,24 @@ public:
   std::uint64_t now_us() const noexcept override { return value; }
   std::uint64_t value{123456};
 };
+
+bool capture_confirmation_test() {
+  using namespace continuous_auth::collector;
+  using namespace continuous_auth::protocol::v1;
+  FakeClock clock;
+  EventPublisher keyboard(clock, 2, OverloadPolicy::drop_newest);
+  EventPublisher mouse(clock, 2, OverloadPolicy::drop_newest);
+  if (keyboard.input_captured() || mouse.input_captured()) return false;
+  keyboard.publish(EventFrame{Heartbeat{}});
+  if (keyboard.input_captured()) return false;
+  keyboard.publish_keyboard(CapturedKeyboardEvent{});
+  mouse.publish_mouse(CapturedMouseEvent{});
+  if (!keyboard.input_captured() || !mouse.input_captured()) return false;
+  keyboard.next();
+  keyboard.next();
+  mouse.next();
+  return keyboard.input_captured() && mouse.input_captured();
+}
 
 bool buffer_test() {
   using continuous_auth::collector::BoundedBuffer;
@@ -128,6 +160,76 @@ bool category_test() {
          categories.category_for("unseen.exe") == ApplicationCategory::kUnknown;
 }
 
+#if defined(__APPLE__)
+bool macos_transport_test() {
+  const auto name = "synthetic-transport-" + std::to_string(static_cast<unsigned long>(getpid()));
+  const auto directory =
+      "/tmp/continuous-auth-" + std::to_string(static_cast<unsigned long>(getuid()));
+  const auto endpoint = directory + "/" + name + ".sock";
+  if (mkdir(directory.c_str(), 0700) != 0 && errno != EEXIST) return false;
+  if (chmod(directory.c_str(), 0700) != 0) return false;
+  unlink(endpoint.c_str());
+
+  const auto listener = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (listener < 0) return false;
+  sockaddr_un address{};
+  if (endpoint.size() >= sizeof(address.sun_path)) {
+    close(listener);
+    return false;
+  }
+  address.sun_family = AF_UNIX;
+  std::memcpy(address.sun_path, endpoint.c_str(), endpoint.size() + 1);
+  if (bind(listener, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
+      listen(listener, 1) != 0) {
+    close(listener);
+    unlink(endpoint.c_str());
+    return false;
+  }
+
+  const std::vector<std::uint8_t> expected{0, 0, 0, 3, 'C', '1', '!'};
+  std::vector<std::uint8_t> received(expected.size());
+  auto transport = continuous_auth::collector::make_named_pipe_transport(name);
+  if (!transport->connect()) {
+    close(listener);
+    unlink(endpoint.c_str());
+    return false;
+  }
+  std::thread receiver([&]() {
+    const auto connection = accept(listener, nullptr, nullptr);
+    if (connection < 0) return;
+    std::size_t offset = 0;
+    while (offset < received.size()) {
+      const auto count = recv(connection, received.data() + offset, received.size() - offset, 0);
+      if (count <= 0) break;
+      offset += static_cast<std::size_t>(count);
+    }
+    close(connection);
+  });
+  const auto sent = transport->send(expected);
+  transport->close();
+  receiver.join();
+  close(listener);
+  unlink(endpoint.c_str());
+  return sent && received == expected;
+}
+
+bool macos_pause_signal_test() {
+  const auto name =
+      "synthetic-pause-" + std::to_string(static_cast<unsigned long>(getpid()));
+  auto pause = continuous_auth::collector::make_pause_signal(name);
+  const auto semaphore_name = "/" + name;
+  auto* semaphore = sem_open(semaphore_name.c_str(), 0);
+  if (semaphore == SEM_FAILED) return false;
+  const auto initially_active = !pause->paused();
+  const auto posted = sem_post(semaphore) == 0;
+  const auto paused = pause->paused();
+  const auto reset = sem_trywait(semaphore) == 0;
+  const auto resumed = !pause->paused();
+  sem_close(semaphore);
+  return initially_active && posted && paused && reset && resumed;
+}
+#endif
+
 }  // namespace
 
 int main() {
@@ -139,5 +241,10 @@ int main() {
   if (!publisher_and_frame_test()) return 5;
   if (!category_test()) return 6;
   if (!callback_event_conversion_test()) return 7;
+  if (!capture_confirmation_test()) return 10;
+#if defined(__APPLE__)
+  if (!macos_transport_test()) return 8;
+  if (!macos_pause_signal_test()) return 9;
+#endif
   return 0;
 }

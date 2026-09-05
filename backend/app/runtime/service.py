@@ -1,4 +1,4 @@
-"""Async lifecycle that keeps pipe failures independent from API/enforcement."""
+"""Async lifecycle that keeps local transport failures independent from API/enforcement."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from backend.app.websocket.broker import EventBroker
 from protocol.generated.python.contracts import Alert, AlertType, StreamEventType
 
-from .named_pipe import NamedPipeError, WindowsNamedPipeServer
+from .named_pipe import LocalByteStreamServer, LocalTransportError
 from .orchestrator import RuntimeOrchestrator, StreamEmission
 
 AvailabilitySink = Callable[[str], None]
@@ -23,7 +23,7 @@ class IntegratedRuntimeService:
         self,
         *,
         orchestrator: RuntimeOrchestrator,
-        pipe: WindowsNamedPipeServer,
+        pipe: LocalByteStreamServer,
         broker: EventBroker,
         watchdog_interval_seconds: float,
         availability_sink: AvailabilitySink | None = None,
@@ -95,7 +95,7 @@ class IntegratedRuntimeService:
                         "TRANSPORT_RECOVERY_FAILED",
                     }
                 )
-            except NamedPipeError:
+            except LocalTransportError:
                 await self._recover_transport()
                 await self._signal_availability("COLLECTOR_PIPE_UNAVAILABLE")
                 await asyncio.sleep(self.watchdog_interval_seconds)

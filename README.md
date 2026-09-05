@@ -1,15 +1,15 @@
 # Continuous Authentication Using Behavioral Biometrics
 
-Local-first, Windows-primary continuous verification using content-free keyboard and
+Local-first Windows and macOS continuous verification using content-free keyboard and
 mouse dynamics. Shared contracts live only in `protocol/`, feature computation lives
 only in `ml/features/`, and every operational/security tunable lives in `config/`.
 
 ## Implemented software baseline
 
 - Generated JSON Schema/Pydantic/C++ C1–C9 contracts and privacy guardrails.
-- Deterministic synthetic fixtures; bounded native Windows hooks, QPC timestamps,
-  content-free key classification, context/device metadata, pause, heartbeat, and named
-  pipe transport.
+- Deterministic synthetic fixtures; bounded native Windows/macOS hooks, native monotonic
+  timestamps, content-free key classification, context/device metadata, pause, heartbeat,
+  and private local transport.
 - Ordered ingestion, shared feature windows, independent per-user models, calibration,
   context confidence, risk/state policy, fail-open enforcement adapters, SQLite/audit,
   retention, and model-update promotion/rollback.
@@ -17,7 +17,7 @@ only in `ml/features/`, and every operational/security tunable lives in `config/
   six-view React dashboard.
 - Consent-aware collection health, immutable day-disjoint freeze, full robustness
   matrix ledger, threshold/config freeze, runtime benchmark helpers, E1/E2 calculations,
-  and Windows packaging scripts.
+  Windows packaging scripts, and macOS-native startup guidance.
 
 ## Local verification
 
@@ -40,14 +40,15 @@ npm run build
 ```
 
 See `docs/architecture.md` for component/privacy boundaries,
-`docs/deployment/windows.md` for packaging, `docs/pilot/` for collection operations,
+`docs/deployment/windows.md` and `docs/deployment/macos.md` for deployment,
+`docs/pilot/` for collection operations,
 `docs/update-manager.md` for G1–G6, and `docs/evaluation.md` for evidence rules.
-See `startup.md` for Docker control-plane startup and the complete ordered Windows
-startup procedure, including the native event collector.
+See `startup.md` for Docker control-plane startup and the complete ordered Windows/macOS
+startup procedures, including the native event collector.
 
 ## Evidence still requiring humans
 
-The repository cannot manufacture consent, participant collection days, real Windows
+The repository cannot manufacture consent, participant collection days, real Windows/macOS
 hook/timing evidence, security approval for OS enforcement actions, informed mimicry,
 live takeover, clean-machine/soak evidence, or academic review. Development thresholds
 are explicitly unreviewed and no accuracy is claimed. Participant data, databases,

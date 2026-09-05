@@ -51,10 +51,12 @@ bool EventPublisher::publish(continuous_auth::protocol::v1::EventFrame event) no
 }
 
 bool EventPublisher::publish_keyboard(CapturedKeyboardEvent event) noexcept {
+  input_captured_.store(true, std::memory_order_relaxed);
   return buffer_.try_push(BufferedEvent(event));
 }
 
 bool EventPublisher::publish_mouse(CapturedMouseEvent event) noexcept {
+  input_captured_.store(true, std::memory_order_relaxed);
   return buffer_.try_push(BufferedEvent(event));
 }
 
@@ -93,6 +95,10 @@ std::int64_t EventPublisher::current_app() const noexcept {
 
 bool EventPublisher::clock_failed() const noexcept {
   return clock_failed_.load(std::memory_order_relaxed);
+}
+
+bool EventPublisher::input_captured() const noexcept {
+  return input_captured_.load(std::memory_order_relaxed);
 }
 
 std::uint64_t EventPublisher::dropped() const noexcept { return buffer_.dropped(); }

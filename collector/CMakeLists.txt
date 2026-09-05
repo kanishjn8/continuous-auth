@@ -28,6 +28,15 @@ target_link_libraries(continuous_auth_collector_core PUBLIC continuous_auth_prot
 
 if(WIN32)
   target_link_libraries(continuous_auth_collector_core PRIVATE User32 Psapi)
+elseif(APPLE)
+  enable_language(OBJCXX)
+  find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
+  find_library(APPLICATION_SERVICES_FRAMEWORK ApplicationServices REQUIRED)
+  target_sources(continuous_auth_collector_core PRIVATE src/context/macos_context.mm)
+  target_link_libraries(
+    continuous_auth_collector_core
+    PRIVATE ${APPKIT_FRAMEWORK} ${APPLICATION_SERVICES_FRAMEWORK}
+  )
 endif()
 
 add_executable(continuous_auth_collector src/main.cpp)

@@ -36,7 +36,7 @@ from datetime import datetime
 from pathlib import Path
 
 from backend.app.runtime.profiles import DirectoryProfileProvider
-from backend.app.storage.config import load_storage_settings
+from backend.app.storage.config import default_storage_config, load_storage_settings
 from backend.app.storage.service import StorageService
 from backend.app.updates.config import UpdateSettings, load_update_settings
 from backend.app.updates.manager import (
@@ -284,7 +284,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--database", type=Path, required=True)
     run.add_argument("--manifest", type=Path, required=True)
     run.add_argument("--artifact-root", type=Path, required=True)
-    run.add_argument("--storage-config", type=Path, default=ROOT / "config/storage.pilot.yaml")
+    run.add_argument("--storage-config", type=Path, default=default_storage_config(ROOT))
     # No default: see tools/enrollment/activate.py -- there is no approved
     # config/ml.pilot.yaml in this repository, so the operator must name one.
     run.add_argument("--ml-config", type=Path, required=True)

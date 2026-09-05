@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 from backend.app.risk.config import load_risk_settings
-from backend.app.storage.config import load_storage_settings
+from backend.app.storage.config import default_storage_config, load_storage_settings
 from backend.app.storage.service import StorageService
 from backend.app.updates.config import load_update_settings
 from ml.features.config import load_config as load_ml_config
@@ -33,7 +33,7 @@ def _common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--administration", type=Path, required=True)
     parser.add_argument("--artifact-root", type=Path, required=True)
-    parser.add_argument("--storage-config", type=Path, default=ROOT / "config/storage.pilot.yaml")
+    parser.add_argument("--storage-config", type=Path, default=default_storage_config(ROOT))
     parser.add_argument(
         "--collection-config", type=Path, default=ROOT / "config/collection.pilot.yaml"
     )

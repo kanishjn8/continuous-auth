@@ -363,6 +363,7 @@ def test_no_windows_enforcement_is_attempted_off_windows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("backend.app.decisions.native.windows_platform", lambda: False)
+    monkeypatch.setattr("backend.app.decisions.native.macos_platform", lambda: False)
     monkeypatch.setattr(
         "backend.app.decisions.native.lock_workstation",
         lambda: pytest.fail("lock_workstation must not run off Windows"),
@@ -387,6 +388,33 @@ def test_no_windows_enforcement_is_attempted_off_windows(
     prompt = adapter.execute(ActionRequest(reauth, reauth.decision_id))
     assert prompt.status is ActionStatus.SKIPPED
     assert prompt.code == "NATIVE_PROMPT_UNSUPPORTED_PLATFORM"
+
+
+def test_macos_lock_uses_the_fixed_system_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr("backend.app.decisions.native.windows_platform", lambda: False)
+    monkeypatch.setattr("backend.app.decisions.native.macos_platform", lambda: True)
+
+    def run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        del kwargs
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("backend.app.decisions.native.subprocess.run", run)
+    result = WindowsLockAdapter(_settings()).execute(
+        ActionRequest(_decision(DecisionAction.TERMINATE), "decision-1")
+    )
+    assert result.status is ActionStatus.SUCCEEDED
+    assert calls == [
+        [
+            "/usr/bin/osascript",
+            "-e",
+            'tell application "System Events" to keystroke "q" '
+            "using {control down, command down}",
+        ]
+    ]
 
 
 def test_open_scheduled_registers_a_non_blocking_pending_challenge(

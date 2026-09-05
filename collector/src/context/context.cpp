@@ -3,6 +3,8 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <psapi.h>
+#elif defined(__APPLE__)
+#include "continuous_auth/collector/macos_context.hpp"
 #endif
 
 #include <algorithm>
@@ -134,7 +136,7 @@ public:
 private:
   HANDLE handle_{};
 };
-#else
+#elif !defined(__APPLE__)
 class NoopContextResolver final : public ContextResolver {
 public:
   void emit_focus_if_changed(EventPublisher&) noexcept override {}
@@ -174,6 +176,8 @@ std::unique_ptr<ContextResolver> make_platform_context_resolver(
     ApplicationCategories categories) {
 #if defined(_WIN32)
   return std::make_unique<WindowsContextResolver>(std::move(categories));
+#elif defined(__APPLE__)
+  return make_macos_context_resolver(std::move(categories));
 #else
   static_cast<void>(categories);
   return std::make_unique<NoopContextResolver>();
@@ -183,6 +187,8 @@ std::unique_ptr<ContextResolver> make_platform_context_resolver(
 std::unique_ptr<PauseSignal> make_pause_signal(const std::string& event_name) {
 #if defined(_WIN32)
   return std::make_unique<WindowsPauseSignal>(event_name);
+#elif defined(__APPLE__)
+  return make_macos_pause_signal(event_name);
 #else
   static_cast<void>(event_name);
   return std::make_unique<NoopPauseSignal>();

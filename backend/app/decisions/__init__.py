@@ -22,7 +22,7 @@ from .challenge import (
     UnknownChallenge,
 )
 from .config import EnforcementSettings, load_enforcement_settings
-from .native import NativeChallengeAdapter, WindowsLockAdapter
+from .native import NativeChallengeAdapter, WindowsLockAdapter, WorkstationLockAdapter
 from .policy import DecisionPolicy, PolicyResult
 
 __all__ = [
@@ -48,5 +48,6 @@ __all__ = [
     "UnknownChallenge",
     "VerificationRecord",
     "WindowsLockAdapter",
+    "WorkstationLockAdapter",
     "load_enforcement_settings",
 ]

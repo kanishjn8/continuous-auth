@@ -9,7 +9,7 @@ from pathlib import Path
 from .config import load_collection_settings
 from .freeze import build_freeze, verify_freeze
 from .health import build_health_report
-from .pause import WindowsPauseController
+from .pause import make_pause_controller
 from .repository import load_administration_records, load_window_summaries
 
 
@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     settings = load_collection_settings(arguments.config)
     if arguments.command in {"pause", "resume"}:
-        controller = WindowsPauseController(arguments.event_name)
+        controller = make_pause_controller(arguments.event_name)
         controller.pause() if arguments.command == "pause" else controller.resume()
         return 0
     windows = load_window_summaries(arguments.database)

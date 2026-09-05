@@ -25,8 +25,8 @@ python -m tools.synthetic --scenario takeover --output data/synthetic/takeover
 ```
 
 The framing fixture is portable and transport-independent: a four-byte
-unsigned network-order length followed by canonical UTF-8 JSON. T-005 may
-carry these frames over a Windows named pipe or another swappable transport;
+unsigned network-order length followed by canonical UTF-8 JSON. T-005 carries
+these frames over a Windows named pipe or a private macOS Unix socket;
 T-007 consumes them incrementally.
 
 Edit only `config/synthetic.development.yaml` to tune generator behavior.

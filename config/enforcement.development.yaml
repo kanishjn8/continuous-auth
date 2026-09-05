@@ -24,7 +24,7 @@ enforcement:
   # Show the native always-on-top prompt for SOFT_CHALLENGE / REAUTH.
   native_prompt: true
 
-  # Lock the real Windows workstation on TERMINATE. Requires `enabled`.
+  # Lock the real Windows or macOS workstation on TERMINATE. Requires `enabled`.
   lock_workstation: true
 
   # A dispatched challenge that is never answered expires after this many

@@ -3,6 +3,10 @@
 A step-by-step guide for running the continuous-authentication system on your own
 Windows PC and collecting data.
 
+For macOS, use the complete platform-specific procedure in `startup.md` and
+`docs/deployment/macos.md`; the privacy and participant requirements in this guide are
+otherwise unchanged.
+
 **Time needed:** about 30–45 minutes the first time. After that, roughly one minute
 each morning to start it.
 
@@ -331,9 +335,9 @@ collection.
 **The collector keeps reconnecting**
 Start the backend first, then the collector. Both must run as the same Windows user.
 
-**"production named-pipe ingestion requires Windows"**
-You are trying to run the full pipeline on macOS, Linux, WSL, or in Docker. It only
-works directly on Windows.
+**"production collector transport requires Windows or macOS"**
+You are trying to run the full pipeline on Linux, WSL, Docker, or another unsupported
+host. It works directly on Windows and macOS.
 
 **The dashboard says protection is unavailable**
 Expected until enough data exists to build your profile. It is being honest, not broken.
