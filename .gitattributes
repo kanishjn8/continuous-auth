@@ -1,0 +1,10 @@
+# protocol/schemas/contracts.schema.json is hashed as raw bytes by
+# protocol/codegen/generate.py (hashlib.sha256 over SCHEMA_PATH.read_bytes())
+# to embed a "schema-sha256" header in every generated binding. That hash
+# must be identical on every machine and OS, so this file (and its sibling
+# per-contract schema files) must never be re-encoded to CRLF by a Windows
+# checkout with core.autocrlf=true. Without this, `generate.py --check`
+# fails with "generated binding is stale" purely from a Windows checkout,
+# with no actual schema change.
+protocol/schemas/*.json text eol=lf
+protocol/schemas/*.yaml text eol=lf
