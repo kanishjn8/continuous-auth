@@ -263,10 +263,18 @@ messaging — all of it is useful.
 
 **Run it on as many separate days as you can.** Not hours — *days*.
 
-The evaluation trains on some days and tests on others, so it needs at least
-**2 different calendar days** to work at all, and 4–5 is much better. Ten hours on one
-single day is worth less than one hour on each of five days. You cannot make up missed
-days later.
+The evaluation trains on some days and tests on others, and the days are kept strictly
+separate. That needs **at least 4 different calendar days** in total: the corpus is
+split into training / validation / evaluation days, and after that split the training
+half must still cover **at least 2 distinct days** (`config/ml.development.yaml →
+enrollment.min_train_distinct_days`), so that one day's posture or mood cannot alone
+define your baseline.
+
+Three days is the bare minimum for the split to exist at all
+(`config/collection.pilot.yaml → freeze.min_distinct_days`), but it leaves only one
+training day, which is not enough to build a first model from. Four is the real
+minimum. Ten hours on one single day is worth less than one hour on each of four days.
+You cannot make up missed days later.
 
 ### Checking it is actually working
 
@@ -348,11 +356,11 @@ Expected until enough data exists to build your profile. It is being honest, not
 | Your data lives in | `%LOCALAPPDATA%\ContinuousAuthentication\Pilot` |
 | Start (Path A) | `.\run-development.ps1 -ParticipantId your-pseudonym` |
 | Stop | `Ctrl+C` in the terminal |
-| Minimum useful | 2 different days |
+| Minimum useful | 4 different days (2 of which become training days) |
 | Good target | 4–5 different days |
 
 If anything is confusing or breaks, message Manas rather than guessing — a machine set
-up slightly wrong for five days is five days wasted.
+up slightly wrong for four days is four days wasted.
 
 ---
 
@@ -372,12 +380,16 @@ whether the participant already has an active profile:
   first profile could never satisfy it; the enrollment gate uses different evidence
   instead: eligible provenance, active consent, a recorded enrollment, membership of a
   checksum-verified freeze manifest, a recorded observation time per window, the
-  configured minimum windows and distinct days, and — critically — no existing active
+  configured minimum TRAIN windows and distinct days
+  (`config/ml.development.yaml → enrollment.*`), and — critically — no existing active
   profile for that participant. `python -m tools.enrollment activate` runs this end to
   end from the frozen corpus: it trains on the TRAIN partition, measures FRR on the
-  held-out VALIDATION partition and FAR by zero-effort cross-evaluation against other
-  participants, and activates the profile. The EVALUATION partition is never touched
-  by this step — it stays reserved for the headline result.
+  held-out VALIDATION partition, and activates the profile. FAR comes from zero-effort
+  cross-evaluation against **other participants** — so with a single participant it is
+  recorded as `None`, meaning *not measured*, with reason code
+  `ENROLLMENT_INITIAL_PROFILE_NO_IMPOSTOR_COHORT`. It is never written as `0.0`, and it
+  is **not** a gate on first activation (ADR-014). The EVALUATION partition is never
+  touched by this step — it stays reserved for the headline result.
 - **Every update after that:** `ml/training/gate.py`'s six-gate promotion gate (G1-G6)
   is unchanged and still governs it. Every `TEAM`/`PILOT` segment must carry a
   promoted `UpdateCandidate` with all six gates passed; `python -m tools.updates run`
@@ -392,10 +404,14 @@ every day collected has cleared the 7-day quarantine before that run executes.
 
 Two things this does *not* resolve yet, so do not claim otherwise:
 
-- **E1 (drift benefit) and E2 (poisoning resistance)** are implemented
-  (`python -m tools.experiments e1|e2`) but have only been run against synthetic
-  fixtures so far. Neither is evidence until run on the frozen eligible corpus with
-  the evaluation freeze verified — both remain pending.
+- **Model updates are disabled for this single-participant pilot, and E1 (drift
+  benefit) and E2 (poisoning resistance) are therefore unrun** — not "pending", not
+  "forthcoming". Both are implemented (`python -m tools.experiments e1|e2`) and have
+  only ever been run against synthetic fixtures. An update can only be certified by
+  showing it did not raise FAR, FAR needs an impostor cohort, and this pilot has none,
+  so `python -m tools.updates run` refuses immediately with
+  `UPDATE_REQUIRES_IMPOSTOR_COHORT` before training anything. No gate, quarantine, or
+  tolerance was weakened to reach that state, and none should be.
 - **The runtime configuration is still development-only.** `config/updates.development.yaml`
   and the other five runtime loaders (`api`, `decisions`, `risk`, `risk` context,
   `runtime`) all require `development_only: true` and are not yet approved for pilot

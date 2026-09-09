@@ -31,7 +31,26 @@ administration under `data/` uses only the assigned pseudonym.
 - Confirm consent remains active and provenance is `PILOT`.
 - Resolve or document coverage shortfalls and device changes.
 - Verify every participant has enough distinct days for three non-empty day-disjoint
-  partitions.
-- Create the write-once manifest, verify its checksums, and record its version.
+  partitions (`freeze.min_distinct_days`), **and** that the resulting TRAIN partition
+  covers at least `ml.enrollment.min_train_distinct_days` distinct days. Under the
+  60/20/20 split those are different requirements: 3 collection days satisfy the first
+  and fail the second; 4 satisfy both.
+- Confirm **no attacker drill has been run yet**. The corpus is frozen before any drill,
+  never after.
+- Create the write-once manifest, verify its checksums, and record its version and
+  timestamp — the timestamp is the auditable evidence that the corpus predates the drill.
 - Freeze configurations and code revision before final evaluation; never append late
   windows or tune against evaluation results.
+
+## Attacker drill (after activation only)
+
+- Confirm the profile is `ACTIVE`, the shadow period has been reviewed, and the corpus
+  is already frozen.
+- Follow [attack-drill-protocol.md](attack-drill-protocol.md). Start the backend with
+  `--drill-label <label>`; never use that flag for genuine collection.
+- Brief the attacker on what is recorded, that the machine may lock, and that they may
+  stop at any time. They are not enrolled and contribute no training data.
+- Expect `validation_far: null` on the activated profile. That means *not measured*, and
+  it is correct. `0.0` would be fabricated — if you see it, stop and investigate.
+- Do not create a new freeze after a drill. If a later round requires one, use a new
+  version name and verify no drill window appears in the manifest.

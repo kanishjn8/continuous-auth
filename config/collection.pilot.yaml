@@ -27,8 +27,24 @@ collection:
   eligible_provenance: [PILOT]
 
 freeze:
-  # Five days partitions to a valid day-disjoint 2/2/1 split under
-  # freeze._partition_days, which reserves one whole day per partition first.
+  # This is the SPLITTABILITY floor: the fewest collection days from which
+  # freeze._partition_days can produce three non-empty day-disjoint partitions.
+  # It reserves one whole day per partition first, then distributes 60/20/20:
+  #
+  #   3 days -> TRAIN 1, VALIDATION 1, EVALUATION 1
+  #   4 days -> TRAIN 2, VALIDATION 1, EVALUATION 1
+  #   5 days -> TRAIN 2, VALIDATION 2, EVALUATION 1
+  #   6 days -> TRAIN 3, VALIDATION 2, EVALUATION 1
+  #
+  # It is NOT the first-model requirement. A first profile additionally needs
+  # its TRAIN partition to cover at least
+  # `config/ml.*.yaml -> enrollment.min_train_distinct_days` (2) distinct days,
+  # which the table above shows takes 4 collection days -- not 3, and not 6.
+  # And neither of these is the live state-machine threshold
+  # `config/risk.*.yaml -> enrollment.min_distinct_days`, which is counted over
+  # the user's whole observed history rather than over a partition.
+  # ADR-014 separated these three after one value was found to be answering
+  # all of them at once.
   min_distinct_days: 3
   training_fraction: 0.60
   validation_fraction: 0.20
