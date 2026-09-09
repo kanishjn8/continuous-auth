@@ -50,7 +50,7 @@ system. What it may never do is become training data:
 ```
 attacker window
   ├─→ score · risk · state transition · escalation · enforcement · alert · audit   ALLOWED
-  ├─✗ load_window_summaries          (single centralized drill_sessions filter)
+  ├─✗ every corpus loader            (drill_sessions filter, five call sites)
   │     └─✗ health · build_freeze · verify_freeze · load_frozen_corpus
   │           └─✗ require_enrollment_admission   (WINDOW_NOT_IN_FROZEN_CORPUS)
   │           └─✗ train_one_class_model · calibration · baseline construction
@@ -66,12 +66,37 @@ progress* — the bookkeeping that ages a user from `ENROLLING` to `CALIBRATING`
 `ACTIVE` — is suppressed, because attacker behaviour must not advance the legitimate
 user's enrollment. *Live risk-state transitions*, including `DEGRADED`, and the entire
 escalation ladder are **not** suppressed, because the drill exists to exercise them.
+`RuntimeOrchestrator._progress_enrollment_and_calibration` is named for that boundary.
 
-`tools/collection/repository.py::load_window_summaries` is the single centralized corpus
-eligibility filter; `tools/collection/corpus.py::load_frozen_corpus` additionally
-re-checks the manifest membership it verifies. Guardrail G12 fails the build if a corpus
-loader stops filtering. The behavioural tests in `backend/tests/test_attack_drill.py` are
-the real protection; G12 catches careless deletion.
+`backend/app/storage/drill.py` holds the single definition of corpus eligibility. Every
+reader of `feature_windows` whose output can reach training applies it — there are five,
+and they were enumerated rather than assumed:
+
+| Site | Purpose |
+| --- | --- |
+| `tools/collection/repository.py` | health, `build_freeze`, `verify_freeze` |
+| `tools/collection/corpus.py` | training / enrollment / validation / evaluation corpus |
+| `backend/app/runtime/orchestrator.py` | enrollment-progress counts |
+| `ml/experiments/app_usage_study.py` | dataset statistics |
+| `tools/demo/bootstrap_first_model.py` | synthetic demo training |
+
+`tools/collection/corpus.py` reads `feature_windows` directly rather than through
+`load_window_summaries`, so it repeats the filter instead of inheriting it: a corpus
+loader must never depend on someone else having filtered first.
+
+Three readers deliberately do **not** filter, because excluding drill data there would
+hide the drill rather than protect the corpus: retention (drill windows age out like any
+other), the provenance lookup taken while storing a score, and the operator-facing
+profile view in the API, where hiding a live drill from the operator watching it would be
+actively misleading. That view is display only and drives no training, calibration, or
+state decision.
+
+A database predating storage migration `0004_attack_drill` raises
+`DRILL_TABLE_MISSING` rather than silently answering "not a drill". Guardrail G12 fails
+the build if a corpus loader stops filtering. The behavioural tests in
+`backend/tests/test_attack_drill.py` are the real protection — they assert both halves of
+the invariant, with controls proving the suppression is drill-specific and not a disabled
+drill; G12 catches careless deletion.
 
 All contracts originate in `protocol/`, all feature computations originate in
 `ml/features/`, and all tunable thresholds, capacities, cadences, and quality limits

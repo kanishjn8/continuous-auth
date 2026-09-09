@@ -30,7 +30,7 @@ from backend.app.models.service import ProfileArtifacts
 from backend.app.updates import UpdateManager, load_update_settings
 from backend.app.updates.repository import SQLiteUpdateRepository
 from ml.features.config import load_config as load_ml_config
-from ml.features.schema import DeviceClass, KeyboardEvent, KeyClass
+from ml.features.schema import DeviceClass, Heartbeat, KeyboardEvent, KeyClass
 from protocol.generated.python.contracts import (
     DataProvenance,
     RetentionConfig,
@@ -419,3 +419,187 @@ def test_a_blank_drill_label_is_refused(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     with pytest.raises(ValueError, match="drill label must not be blank"):
         _runtime(storage, drill_label="   ")
+
+
+# ---------------------------------------------------------------------------
+# Calibration progression and DEGRADED recovery (ADR-014 Phase D).
+#
+# These share this module's runtime harness rather than duplicating it.
+# ---------------------------------------------------------------------------
+
+
+def _seed_scores(
+    storage: StorageService,
+    user_id: str,
+    *,
+    count: int,
+    profile_version: str,
+    available: bool,
+) -> None:
+    """Seed `scores` rows for the calibration-counting tests.
+
+    Scores written while no model existed carry profile_version
+    'unavailable'. The live pilot database holds 1221 of them; counting them
+    let a user reach ACTIVE within one window of activation, skipping the
+    PLAN.md Section 5.3 shadow period entirely.
+    """
+
+    score_json = json.dumps(
+        {
+            "keyboard": {"available": available, "status": "SCORED" if available else "UNAVAILABLE"},
+            "mouse": {"available": available, "status": "SCORED" if available else "UNAVAILABLE"},
+        }
+    )
+    with storage.database.transaction() as connection:
+        for index in range(count):
+            connection.execute(
+                """
+                INSERT INTO scores(
+                    user_id, window_id, profile_version, feature_schema_version,
+                    model_version, quality_label, score_json, schema_version, stored_at_utc
+                ) VALUES (?, ?, ?, '1.0.0', 'unavailable', 'FULL', ?, '1.0.0', ?)
+                """,
+                (
+                    user_id,
+                    f"seed-window-{index}",
+                    profile_version,
+                    score_json,
+                    "2026-01-01T00:00:00Z",
+                ),
+            )
+
+
+def test_pre_activation_scores_do_not_satisfy_calibration(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    _seed_enrollment_evidence(storage, "synthetic-user")
+    _seed_scores(
+        storage, "synthetic-user", count=50, profile_version="unavailable", available=True
+    )
+
+    _run_session(storage, session_id="genuine-1", day=2, with_profile=True)
+
+    with storage.database.connection() as connection:
+        state = connection.execute(
+            "SELECT state FROM users WHERE user_id = ?", ("synthetic-user",)
+        ).fetchone()
+    # Enrollment evidence is met, so CALIBRATING is reached -- but the 50
+    # pre-activation rows must not carry the user straight through to ACTIVE.
+    assert UserState(state["state"]) is UserState.CALIBRATING
+
+
+def test_windows_with_no_available_modality_do_not_count_toward_calibration(
+    tmp_path: Path,
+) -> None:
+    """An idle lunch break must not age a user into ACTIVE.
+
+    These rows carry the CURRENT profile version, so the version equality
+    alone does not exclude them -- only the availability filter does.
+    """
+    storage = _storage(tmp_path)
+    _seed_enrollment_evidence(storage, "synthetic-user")
+    _seed_scores(
+        storage,
+        "synthetic-user",
+        count=50,
+        profile_version="drill-test-profile",
+        available=False,
+    )
+
+    _run_session(storage, session_id="genuine-1", day=2, with_profile=True)
+
+    with storage.database.connection() as connection:
+        state = connection.execute(
+            "SELECT state FROM users WHERE user_id = ?", ("synthetic-user",)
+        ).fetchone()
+    assert UserState(state["state"]) is UserState.CALIBRATING
+
+
+def test_post_activation_scored_windows_do_complete_calibration(tmp_path: Path) -> None:
+    """Control: calibration is reachable, so the filters are not just refusing."""
+    storage = _storage(tmp_path)
+    _seed_enrollment_evidence(storage, "synthetic-user")
+    _seed_scores(
+        storage,
+        "synthetic-user",
+        count=50,
+        profile_version="drill-test-profile",
+        available=True,
+    )
+
+    _run_session(storage, session_id="genuine-1", day=2, with_profile=True)
+
+    with storage.database.connection() as connection:
+        state = connection.execute(
+            "SELECT state FROM users WHERE user_id = ?", ("synthetic-user",)
+        ).fetchone()
+    assert UserState(state["state"]) is UserState.ACTIVE
+
+
+def test_degraded_recovers_when_the_heartbeat_resumes(tmp_path: Path) -> None:
+    """DEGRADED is recoverable, not a one-way door (ADR-011).
+
+    Without this a single heartbeat gap suspends enforcement for the rest of
+    the backend process, silently.
+    """
+    storage = _storage(tmp_path)
+    _seed_enrollment_evidence(storage, "synthetic-user")
+    runtime = _runtime(storage, with_profile=True)
+    runtime.start_authenticated_session(
+        user_id="synthetic-user",
+        evidence_reference="proof",
+        authenticated_at=datetime(2026, 1, 2, tzinfo=UTC),
+        session_id="genuine-1",
+    )
+    assert runtime._risk_engine is not None
+    before = runtime._risk_engine.state_machine.state
+
+    runtime._last_heartbeat_arrival = 0.0
+    runtime.check_heartbeat(now=runtime.heartbeat_timeout_seconds + 1.0)
+    assert runtime._risk_engine.state_machine.state is UserState.DEGRADED
+
+    runtime._handle_heartbeat(
+        _heartbeat()
+    )
+    assert runtime._risk_engine.state_machine.state is before
+
+
+def test_degrade_and_recover_are_both_persisted(tmp_path: Path) -> None:
+    """The users table must not contradict the emitted decision records."""
+    storage = _storage(tmp_path)
+    _seed_enrollment_evidence(storage, "synthetic-user")
+    runtime = _runtime(storage, with_profile=True)
+    runtime.start_authenticated_session(
+        user_id="synthetic-user",
+        evidence_reference="proof",
+        authenticated_at=datetime(2026, 1, 2, tzinfo=UTC),
+        session_id="genuine-1",
+    )
+
+    def stored_state() -> UserState:
+        with storage.database.connection() as connection:
+            row = connection.execute(
+                "SELECT state FROM users WHERE user_id = ?", ("synthetic-user",)
+            ).fetchone()
+        return UserState(row["state"])
+
+    before = stored_state()
+    runtime._last_heartbeat_arrival = 0.0
+    runtime.check_heartbeat(now=runtime.heartbeat_timeout_seconds + 1.0)
+    assert stored_state() is UserState.DEGRADED
+
+    runtime._handle_heartbeat(
+        _heartbeat()
+    )
+    assert stored_state() is before
+
+
+def _heartbeat() -> Heartbeat:
+    return Heartbeat(
+        type="HEARTBEAT",
+        t_capture_us=1,
+        seq=1,
+        collector_uptime_ms=1000,
+        dropped_events=0,
+        buffer_high_water=0,
+        collection_paused=False,
+    )

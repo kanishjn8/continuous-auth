@@ -9,8 +9,9 @@ names, contact details, or signed forms in this repository.
 Start from the [participant brief template](participant-brief-template.md) and
 [operator checklist](operator-checklist.md); both require human approval before use.
 The post-activation attacker drill has its own procedure:
-[attack drill protocol](attack-drill-protocol.md). It runs **after** the corpus is
-frozen and the profile is `ACTIVE`, never before.
+[attack drill protocol](attack-drill-protocol.md), gated by the
+[pre-drill checklist](pre-drill-checklist.md). It runs **after** the corpus is frozen
+and the profile is `ACTIVE`, never before.
 
 The collector records content-free key classes, mouse movement/button/scroll geometry,
 capture-time monotonic timestamps, foreground process name/category, input-device class,

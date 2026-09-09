@@ -19,12 +19,13 @@ from protocol.generated.python.contracts import (
 )
 
 from .config import RiskSettings
-from .state import UserStateMachine
+from .state import StateTransition, UserStateMachine
 from .types import DecisionInput, DecisionTrace, RiskAlert, RiskOutcome
 
 IdFactory = Callable[[], str]
 DecisionSink = Callable[[RiskDecision], None]
 AlertSink = Callable[[RiskAlert], None]
+StateSink = Callable[[StateTransition], None]
 
 
 def _decision_id() -> str:
@@ -43,6 +44,7 @@ class RiskEngine:
         state_machine: UserStateMachine | None = None,
         decision_sink: DecisionSink | None = None,
         alert_sink: AlertSink | None = None,
+        state_sink: StateSink | None = None,
         id_factory: IdFactory | None = None,
     ):
         if not user_id.strip():
@@ -53,6 +55,9 @@ class RiskEngine:
         self._policy = DecisionPolicy(settings)
         self._decision_sink = decision_sink
         self._alert_sink = alert_sink
+        # Every degrade and every recover is written through, so the users
+        # table stops contradicting the decision records it sits beside.
+        self._state_sink = state_sink
         self._id_factory = id_factory or _decision_id
         self._history = deque[float](maxlen=settings.risk.breach_n)
         self._smoothed: float | None = None
@@ -68,6 +73,14 @@ class RiskEngine:
     def _emit_alert(self, alert: RiskAlert) -> None:
         if self._alert_sink is not None:
             self._alert_sink(alert)
+
+    def _emit_state(self, transition: StateTransition | None) -> StateTransition | None:
+        if transition is not None and self._state_sink is not None:
+            self._state_sink(transition)
+        return transition
+
+    def _degrade(self, reason: str) -> None:
+        self._emit_state(self.state_machine.degrade(reason))
 
     def _required_failure(self, request: DecisionInput) -> str | None:
         score = request.score
@@ -123,7 +136,7 @@ class RiskEngine:
         return current
 
     def _failure_outcome(self, request: DecisionInput, detail: str) -> RiskOutcome:
-        self.state_machine.degrade("RISK_INPUT_UNAVAILABLE")
+        self._degrade("RISK_INPUT_UNAVAILABLE")
         alert = RiskAlert(
             alert_type=AlertType.AVAILABILITY,
             severity="HIGH",
@@ -202,6 +215,16 @@ class RiskEngine:
             fused, keyboard_used, mouse_used = self._fusion(request)
         except Exception as exc:
             return self._failure_outcome(request, f"{type(exc).__name__}: {exc}")
+
+        # Every required modality scored and fusion produced a value, so the
+        # inputs this engine degraded over are demonstrably back. Without
+        # this, DEGRADED is a one-way door: a single transient failure
+        # suspends enforcement for the entire life of the process, silently,
+        # with STATE_GATED_NO_ENFORCEMENT on every subsequent action.
+        # ADR-011 describes a recoverable state, not a terminal one.
+        if self.state_machine.state is UserState.DEGRADED:
+            self.component_recovered()
+            state = self.state_machine.state
 
         adjusted = request.context.adjust(fused)
         previous = self._smoothed
@@ -295,7 +318,7 @@ class RiskEngine:
         return RiskOutcome(decision, trace, tuple(alerts))
 
     def heartbeat_lost(self, *, t_capture_us: int, detail: str) -> RiskAlert:
-        self.state_machine.degrade("COLLECTOR_HEARTBEAT_LOST")
+        self._degrade("COLLECTOR_HEARTBEAT_LOST")
         alert = RiskAlert(
             alert_type=AlertType.TAMPER,
             severity="HIGH",
@@ -315,7 +338,7 @@ class RiskEngine:
     ) -> RiskAlert:
         if not component.strip() or not detail.strip():
             raise ValueError("component failure fields must not be blank")
-        self.state_machine.degrade("BACKEND_COMPONENT_FAILED")
+        self._degrade("BACKEND_COMPONENT_FAILED")
         alert = RiskAlert(
             alert_type=AlertType.AVAILABILITY,
             severity="HIGH",
@@ -326,5 +349,16 @@ class RiskEngine:
         self._emit_alert(alert)
         return alert
 
-    def component_recovered(self) -> None:
-        self.state_machine.recover()
+    def component_recovered(self) -> StateTransition | None:
+        """Leave DEGRADED once the unavailable component is back.
+
+        Returns the transition so a caller can persist or log it; ``None``
+        when there was nothing to recover from. ``UserStateMachine.recover``
+        restores the pre-degradation state, so a user who degraded while
+        ACTIVE returns to ACTIVE and one who degraded while CALIBRATING
+        returns to CALIBRATING -- correct in both directions.
+        """
+
+        if self.state_machine.state is not UserState.DEGRADED:
+            return None
+        return self._emit_state(self.state_machine.recover())

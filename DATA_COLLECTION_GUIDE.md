@@ -521,7 +521,11 @@ pseudonym. Then check System health.
 
 These run **once, after** the collection round — don't confuse them with daily steps:
 
-- **Freeze the corpus** (write-once, day-disjoint, checksummed):
+- **Freeze the corpus** (write-once, day-disjoint, checksummed). If the tools
+  report `DRILL_TABLE_MISSING`, the database predates storage migration
+  `0004_attack_drill`: start the backend once so migrations apply, stop it, and
+  retry. Refusing is deliberate — an un-migrated database cannot prove that no
+  attacker-drill windows are in the corpus.
 
 ```powershell
 python -m tools.collection --config config/collection.pilot.yaml freeze `

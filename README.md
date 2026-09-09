@@ -41,9 +41,10 @@ no second enrolled participant, and none is required in order to activate a prof
   **capability exists in the architecture and codebase and is tested**, but it is
   **intentionally disabled for this single-user pilot** and promotes nothing. See
   "Model updates" below.
-- Attacker-drill session isolation: `drill_sessions`, a single centralized corpus
-  eligibility filter, and login-anchor / context-learning / enrollment-progress
-  suppression for declared drills.
+- Attacker-drill session isolation: a `drill_sessions` table, one shared corpus
+  eligibility filter applied by all five readers of `feature_windows` that can reach
+  training, guardrail G12 protecting it, and login-anchor / context-learning /
+  enrollment-progress suppression for declared drills.
 - Authenticated loopback REST/WebSocket API with bounded replay/snapshot resync and a
   six-view React dashboard.
 - Consent-aware collection health, immutable day-disjoint freeze, full robustness
@@ -92,7 +93,8 @@ npm run build
 See `docs/adr/ADR-014-single-participant-enrollment-and-unseen-attacker.md` for the
 study-design decision, `docs/architecture.md` for component/privacy boundaries,
 `docs/deployment/windows.md` for packaging, `docs/pilot/` for collection operations,
-`docs/pilot/attack-drill-protocol.md` for the attacker-drill procedure,
+`docs/pilot/attack-drill-protocol.md` and `docs/pilot/pre-drill-checklist.md` for
+the attacker-drill procedure and its gate,
 `docs/update-manager.md` for G1–G6, and `docs/evaluation.md` for evidence rules.
 See `startup.md` for Docker control-plane startup and the complete ordered Windows
 startup procedure, including the native event collector.

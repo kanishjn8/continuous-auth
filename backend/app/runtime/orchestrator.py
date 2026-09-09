@@ -30,7 +30,7 @@ from backend.app.models.service import ModelScoringService, ProfileArtifacts
 from backend.app.risk.config import RiskSettings
 from backend.app.risk.context import ContextConfidenceLayer
 from backend.app.risk.engine import RiskEngine
-from backend.app.risk.state import UserStateMachine
+from backend.app.risk.state import StateTransition, UserStateMachine
 from backend.app.risk.types import DecisionInput, RiskAlert
 from backend.app.storage.drill import DRILL_EXCLUSION_PREDICATE, require_drill_table
 from backend.app.storage.service import StorageService
@@ -213,6 +213,7 @@ class RuntimeOrchestrator:
             user_id=user_id,
             settings=self.risk_settings,
             state_machine=UserStateMachine(self.risk_settings.enrollment, initial=state),
+            state_sink=self._persist_state,
         )
         self._risk_engine.set_shadow_mode(self._shadow_mode)
         self._active_user = user_id
@@ -471,8 +472,25 @@ class RuntimeOrchestrator:
             for window in builder.push_events([event]):
                 self._process_window(window)
 
+    def _persist_state(self, transition: StateTransition) -> None:
+        """Write a live risk-state transition through to the users table.
+
+        Degrade and recover both route here. Without it the stored state
+        silently disagreed with the user_state stamped on every emitted
+        decision, and an audit reading the two together would contradict
+        itself.
+        """
+
+        if self._active_user is not None:
+            self.storage.upsert_user(self._active_user, transition.current)
+
     def _handle_heartbeat(self, event: Heartbeat) -> None:
         self._last_heartbeat_arrival = time.monotonic()
+        if self._heartbeat_failed and self._risk_engine is not None:
+            # The collector is back. Clearing the flag alone only stopped the
+            # repeat alert; the state machine stayed DEGRADED for the rest of
+            # the process, suspending enforcement silently.
+            self._risk_engine.component_recovered()
         self._heartbeat_failed = False
         health = Health(
             status="DEGRADED" if event.collection_paused else "HEALTHY",

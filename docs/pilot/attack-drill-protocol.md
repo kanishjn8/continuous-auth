@@ -43,6 +43,13 @@ heartbeat.
 
 ## Step 2 — Freeze the corpus
 
+> **First run only:** the corpus tools refuse a database that predates storage
+> migration `0004_attack_drill` with `DRILL_TABLE_MISSING` — an un-migrated database
+> cannot prove drill sessions were excluded, and silently answering "no drills here"
+> is exactly the failure the filter exists to prevent. Migrations apply when the
+> backend opens the database, so start the backend once (any normal run) and stop it
+> again before freezing.
+
 ```powershell
 python -m tools.collection --config config/collection.pilot.yaml health `
   --database $env:CA_STORAGE_DB --administration data/collection/administration.json

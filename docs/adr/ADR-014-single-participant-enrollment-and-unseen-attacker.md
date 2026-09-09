@@ -93,10 +93,14 @@ from a single participant can produce an impostor.
    from every corpus loader.
 
 7. **Attacker data is excluded from all future model-update candidates.** A drill
-   session suppresses update-candidate submission, the automatic A1 login anchor,
-   context-confidence learning, and enrollment/calibration progress. It suppresses
-   **nothing** about scoring, risk evaluation, risk-state transitions, escalation, or
-   enforcement.
+   session suppresses update-candidate submission (not even a `REJECTED` one), the
+   automatic A1 login anchor, context-confidence learning, and enrollment/calibration
+   progress. It suppresses **nothing** about scoring, risk evaluation, live risk-state
+   transitions, escalation, or enforcement. `backend/app/storage/drill.py` holds the
+   single definition of corpus eligibility, and all five readers of `feature_windows`
+   that can reach training apply it; the three that must not are named there with
+   their reasons. An un-migrated database raises `DRILL_TABLE_MISSING` rather than
+   silently answering "not a drill".
 
 8. **Optional multi-participant cohort evaluation may later measure FAR/EER, but it is
    not required for first activation.** `ml/evaluation/cross_evaluation.py` and the I1
