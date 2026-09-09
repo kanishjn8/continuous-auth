@@ -52,6 +52,7 @@ from ml.features.config import MLConfig
 from ml.features.schema import AppCategory, FeatureWindow
 from ml.training.common import PreprocessingParams
 from ml.training.model_wrappers import IsolationForestWrapper
+from backend.app.storage.drill import DRILL_EXCLUSION_SQL, require_drill_table
 
 # ----------------------------------------------------------------------
 # Sufficiency policy
@@ -205,8 +206,13 @@ def assess_corpus(database_path: Path | str) -> CorpusAssessment:
     connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         connection.row_factory = sqlite3.Row
+        require_drill_table(connection)
         rows = connection.execute(
-            "SELECT user_id, session_id, collection_day, context_json FROM feature_windows"
+            # Declared attacker-drill sessions are excluded from every
+            # dataset statistic, so a drill can never inflate reported
+            # coverage or shift a context distribution (ADR-014).
+            "SELECT user_id, session_id, collection_day, context_json "
+            f"FROM feature_windows {DRILL_EXCLUSION_SQL}"
         ).fetchall()
     finally:
         connection.close()

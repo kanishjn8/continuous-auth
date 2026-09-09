@@ -12,6 +12,7 @@ from typing import Any
 
 from protocol.generated.python.contracts import DataProvenance, InputDeviceClass, WindowQuality
 
+from backend.app.storage.drill import DRILL_EXCLUSION_SQL, require_drill_table
 from .eligibility import ConsentRecord, EnrollmentRecord
 from .health import WindowSummary
 
@@ -56,13 +57,19 @@ def load_window_summaries(database_path: Path) -> list[WindowSummary]:
     connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
+        require_drill_table(connection)
         rows = connection.execute(
-            """
+            f"""
             SELECT window_id, user_id, session_id, segment_id, t_start_us, t_end_us,
                    quality_label, key_event_count, mouse_event_count, collection_day,
                    provenance, keyboard_features_json, mouse_features_json, context_json,
                    schema_version, stored_at_utc
             FROM feature_windows
+            -- Declared attacker-drill sessions are observed, scored, and
+            -- enforced, but are never corpus data (ADR-014). Filtering here
+            -- closes the health report, build_freeze, and verify_freeze --
+            -- and therefore also every manifest that could ever be written.
+            {DRILL_EXCLUSION_SQL}
             ORDER BY user_id, stored_at_utc, window_id
             """
         ).fetchall()

@@ -304,6 +304,61 @@ class StorageService:
 
         self._guard("create_session", work)
 
+    def declare_drill_session(self, session_id: str, drill_label: str) -> None:
+        """Record that this session is a declared attacker drill (ADR-014).
+
+        Every window belonging to it is still scored, risk-assessed,
+        escalated, enforced, alerted, and audited -- that is the point of a
+        drill. What it may never do is enter a training, calibration,
+        validation, enrollment, or update corpus. The exclusion is applied by
+        every corpus loader through ``backend/app/storage/drill.py``.
+
+        The declaration is audited like any other lifecycle fact, so "was this
+        session a drill?" is answerable from the hash-chained log and not only
+        from a mutable table.
+        """
+
+        if not drill_label.strip():
+            raise ValueError("drill label must not be blank")
+
+        def work() -> None:
+            declared = _utc_text(None)
+            payload = _json(
+                {
+                    "schema_version": PROTOCOL_VERSION,
+                    "session_id": session_id,
+                    "drill_label": drill_label,
+                    "declared_at_utc": declared,
+                }
+            )
+            with self.database.transaction() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO drill_sessions(
+                        session_id, drill_label, declared_at_utc, schema_version
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (session_id, drill_label, declared, PROTOCOL_VERSION),
+                )
+                self._queue_audit(
+                    connection,
+                    record_id=f"drill-session:{session_id}",
+                    event_type="DRILL_SESSION_DECLARED",
+                    occurred_at_utc=declared,
+                    correlation_id=str(uuid.uuid4()),
+                    payload_json=payload,
+                )
+            self.flush_audit()
+
+        self._guard("declare_drill_session", work)
+
+    def is_drill_session(self, session_id: str) -> bool:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM drill_sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+        return row is not None
+
     def create_segment(
         self,
         segment_id: str,

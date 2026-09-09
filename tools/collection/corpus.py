@@ -19,6 +19,7 @@ from typing import Any
 
 from ml.features.schema import FeatureWindow
 
+from backend.app.storage.drill import DRILL_EXCLUSION_SQL, require_drill_table
 from .freeze import FreezeError, verify_freeze
 from .repository import load_window_summaries
 
@@ -87,13 +88,22 @@ def load_frozen_corpus(database: Path, manifest: Path, partition: str) -> Frozen
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
+        require_drill_table(connection)
         rows = connection.execute(
-            """
+            f"""
             SELECT window_id, user_id, session_id, segment_id, t_start_us, t_end_us,
                    quality_label, key_event_count, mouse_event_count, collection_day,
                    provenance, keyboard_features_json, mouse_features_json, context_json,
                    schema_version, stored_at_utc
-            FROM feature_windows ORDER BY user_id, window_id
+            FROM feature_windows
+            -- Belt and braces. A drill window cannot reach a manifest, because
+            -- load_window_summaries already excluded it before build_freeze ran
+            -- -- but this loader reads feature_windows directly rather than
+            -- through that function, so it repeats the filter rather than
+            -- inheriting it. A corpus loader must never depend on someone
+            -- else having filtered first (ADR-014).
+            {DRILL_EXCLUSION_SQL}
+            ORDER BY user_id, window_id
             """
         ).fetchall()
     finally:

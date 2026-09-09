@@ -209,19 +209,20 @@ def test_migration_creates_required_tables_wal_indexes_and_is_idempotent(
         "verification_anchors",
         "model_profiles",
         "update_runs",
+        "drill_sessions",
     }
     assert required <= _table_names(service)
     with service.database.connection() as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
-        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 3
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 4
         versions = dict(
             connection.execute(
                 "SELECT metadata_key, metadata_value FROM storage_metadata"
             ).fetchall()
         )
         assert versions == {
-            "database_schema_version": "3",
+            "database_schema_version": "4",
             "protocol_version": "1.0.0",
             "storage_config_version": "storage-test-1",
         }

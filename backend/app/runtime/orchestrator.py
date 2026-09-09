@@ -32,6 +32,7 @@ from backend.app.risk.context import ContextConfidenceLayer
 from backend.app.risk.engine import RiskEngine
 from backend.app.risk.state import UserStateMachine
 from backend.app.risk.types import DecisionInput, RiskAlert
+from backend.app.storage.drill import DRILL_EXCLUSION_PREDICATE, require_drill_table
 from backend.app.storage.service import StorageService
 from backend.app.updates.anchors import ScheduledAnchorScheduler
 from backend.app.updates.manager import SegmentEvidence, UpdateManager
@@ -89,11 +90,14 @@ class RuntimeOrchestrator:
         update_manager: UpdateManager | None = None,
         anchor_scheduler: ScheduledAnchorScheduler | None = None,
         challenge_service: ChallengeService | None = None,
+        drill_label: str | None = None,
     ) -> None:
         if provenance not in {DataProvenance.SYNTHETIC, DataProvenance.TEAM, DataProvenance.PILOT}:
             raise ValueError("live runtime provenance must be synthetic, team, or pilot")
         if heartbeat_timeout_seconds <= 0:
             raise ValueError("heartbeat timeout must be positive")
+        if drill_label is not None and not drill_label.strip():
+            raise ValueError("drill label must not be blank")
         self.storage = storage
         self.ml_config = ml_config
         self.risk_settings = risk_settings
@@ -110,6 +114,21 @@ class RuntimeOrchestrator:
         self.update_manager = update_manager
         self.anchor_scheduler = anchor_scheduler
         self.challenge_service = challenge_service
+        # A declared attacker drill (ADR-014). Opt-in and per-process, so a
+        # normal collection run cannot be accidentally labelled and a drill
+        # cannot be accidentally unlabelled -- the operator types a different
+        # command. This suppresses only ENROLLMENT and CALIBRATION
+        # bookkeeping and the training-data paths; it suppresses nothing in
+        # the live security path. See
+        # _progress_enrollment_and_calibration for that distinction.
+        self._drill_label = drill_label
+        if drill_label is not None:
+            # Attacker behaviour must not become the new "genuine" baseline.
+            # These statistics are in-memory only and cannot reach a model or
+            # the database, but they weight the confidence used for later
+            # windows in the same drill -- which would distort the very
+            # measurement the drill exists to produce.
+            self.context_layer.suspend_learning(True)
         self._shadow_mode = storage.shadow_mode_enabled()
         self._active_user: str | None = None
         self._session_id: str | None = None
@@ -208,13 +227,21 @@ class RuntimeOrchestrator:
             )
         )
         assert lifecycle.session_id is not None
-        self.enforcement.record_authenticated_entry(
-            user_id=user_id,
-            session_id=lifecycle.session_id,
-            segment_id=None,
-            evidence_reference=evidence_reference,
-            authenticated_at=observed,
-        )
+        if self._drill_label is not None:
+            self.storage.declare_drill_session(lifecycle.session_id, self._drill_label)
+            # No A1 anchor. The person at the keyboard did not authenticate,
+            # and granting one would hand the attacker the single piece of
+            # evidence promotion gate G2 exists to withhold. The legitimate
+            # user's own earlier anchors are untouched -- anchors are per
+            # session, so an attacker session cannot redefine or reset one.
+        else:
+            self.enforcement.record_authenticated_entry(
+                user_id=user_id,
+                session_id=lifecycle.session_id,
+                segment_id=None,
+                evidence_reference=evidence_reference,
+                authenticated_at=observed,
+            )
         self._session_id = lifecycle.session_id
         if self.anchor_scheduler is not None:
             self.anchor_scheduler.session_started(session_id=lifecycle.session_id, at=observed)
@@ -301,6 +328,12 @@ class RuntimeOrchestrator:
             self.storage.end_session(event.session_id)
 
     def _submit_segment_candidate(self, segment_id: str) -> None:
+        if self._drill_label is not None:
+            # An attacker segment must never become an update candidate --
+            # not even a REJECTED one, which would still put attacker-derived
+            # evidence into the promotion pipeline's records (ADR-014).
+            self._segment_gap_baseline.pop(segment_id, None)
+            return
         if self.update_manager is None:
             self._segment_gap_baseline.pop(segment_id, None)
             return
@@ -554,22 +587,57 @@ class RuntimeOrchestrator:
         if verification is not None and self.anchor_scheduler is not None:
             self.anchor_scheduler.anchor_recorded(session_id=session_id, at=instant)
 
-    def _progress_state(self, *, after_score: bool) -> None:
+    def _progress_enrollment_and_calibration(self, *, after_score: bool) -> None:
+        """Advance ENROLLING -> CALIBRATING -> ACTIVE from observed evidence.
+
+        This is **enrollment and calibration bookkeeping**, not live risk
+        state. The distinction matters and the name is deliberate: an
+        attacker drill suppresses this, because attacker behaviour must not
+        advance the legitimate user's enrollment -- but it suppresses nothing
+        about scoring, risk fusion, live risk-state transitions
+        (including DEGRADED), the escalation ladder, or enforcement. Those
+        run in ``RiskEngine.process`` and are the whole point of a drill.
+        """
+
         if self._active_user is None or self._risk_engine is None:
             return
-        if not self._profile_available:
+        if not self._profile_available or self._scoring is None:
             return
+        if self._drill_label is not None:
+            return
+        profile_version = self._scoring.profile.profile_version
         with self.storage.database.connection() as connection:
+            require_drill_table(connection)
             counts = connection.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS windows, COUNT(DISTINCT collection_day) AS days
-                FROM feature_windows WHERE user_id = ?
+                FROM feature_windows
+                WHERE user_id = ? AND {DRILL_EXCLUSION_PREDICATE}
                 """,
                 (self._active_user,),
             ).fetchone()
+            # Only windows scored by THIS profile, and only where a model
+            # actually produced a score, may age a user out of CALIBRATING.
+            #
+            # Rows written before activation carry profile_version
+            # 'unavailable' (see _refresh_profile's fallback ProfileArtifacts)
+            # and are excluded by the equality alone -- no date logic needed.
+            # Without this a user with a long pre-activation history would
+            # jump ENROLLING -> CALIBRATING -> ACTIVE within one window of
+            # activation, and the PLAN.md Section 5.3 shadow period would
+            # never happen. A superseded profile version likewise restarts
+            # the shadow period rather than inheriting the old one's credit.
+            #
+            # The json_extract clauses additionally exclude INSUFFICIENT_DATA
+            # windows, so an idle lunch break cannot complete calibration.
             scored = connection.execute(
-                "SELECT COUNT(*) AS scored FROM scores WHERE user_id = ?",
-                (self._active_user,),
+                """
+                SELECT COUNT(*) AS scored FROM scores
+                WHERE user_id = ? AND profile_version = ?
+                  AND (json_extract(score_json, '$.keyboard.available') = 1
+                       OR json_extract(score_json, '$.mouse.available') = 1)
+                """,
+                (self._active_user, profile_version),
             ).fetchone()
         transition = self._risk_engine.state_machine.observe_progress(
             enrollment_windows=int(counts["windows"]),
@@ -591,11 +659,11 @@ class RuntimeOrchestrator:
     def _process_window_inner(self, window: FeatureWindow) -> None:
         self.storage.store_feature_window(window)
         self._refresh_profile(window.user_id)
-        self._progress_state(after_score=False)
+        self._progress_enrollment_and_calibration(after_score=False)
         assert self._scoring is not None and self._risk_engine is not None
         scoring = self._scoring.score(window)
         self.storage.store_score(scoring.score)
-        self._progress_state(after_score=True)
+        self._progress_enrollment_and_calibration(after_score=True)
         context = self.context_layer.assess(
             user_id=window.user_id,
             shares=window.context.app_shares,

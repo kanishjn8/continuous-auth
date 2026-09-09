@@ -100,6 +100,7 @@ class ContextConfidenceLayer:
             raise ValueError("bootstrap confidence cannot be below confidence_floor")
         self._statistics: dict[tuple[str, int], EmpiricalStatistics] = {}
         self._baselines: dict[str, EmpiricalStatistics] = {}
+        self._learning_suspended = False
 
     @property
     def min_scale(self) -> float:
@@ -108,6 +109,26 @@ class ContextConfidenceLayer:
     # ------------------------------------------------------------------
     # Observation
     # ------------------------------------------------------------------
+    def suspend_learning(self, enabled: bool) -> None:
+        """Stop accumulating genuine statistics without affecting assessment.
+
+        Set for the lifetime of a declared attacker drill (ADR-014).
+        ``assess()`` keeps working from whatever was learned during genuine
+        operation, which is exactly the right comparison baseline for a
+        drill; what must not happen is the attacker's own behaviour becoming
+        the new "genuine" reference part-way through the measurement.
+
+        These statistics are in-memory only and are never persisted, so this
+        is measurement isolation rather than model-contamination protection.
+        The contamination protection is the corpus exclusion in
+        ``backend/app/storage/drill.py``.
+        """
+
+        self._learning_suspended = enabled
+
+    def learning_suspended(self) -> bool:
+        return self._learning_suspended
+
     def observe_genuine(
         self,
         *,
@@ -120,8 +141,12 @@ class ContextConfidenceLayer:
         Attribution is proportional to focus share, so a window split between
         two applications contributes partial evidence to each rather than full
         evidence to whichever one dominated.
+
+        A no-op while learning is suspended (see :meth:`suspend_learning`).
         """
 
+        if self._learning_suspended:
+            return
         if not user_id.strip():
             raise ValueError("context user_id must not be blank")
         if not math.isfinite(risk_score) or not 0 <= risk_score <= 1:

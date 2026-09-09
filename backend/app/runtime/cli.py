@@ -59,6 +59,19 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=ROOT / "config/enforcement.development.yaml",
     )
+    parser.add_argument(
+        "--drill-label",
+        dest="drill_label",
+        default=None,
+        help=(
+            "Declare this session a live attacker drill (ADR-014). Its windows are "
+            "scored, risk-assessed, escalated and enforced exactly as normal, but "
+            "are permanently excluded from every training, calibration, validation, "
+            "enrollment and model-update corpus. NEVER use this for genuine "
+            "collection. Run it only after the corpus is frozen and the profile is "
+            "ACTIVE; see docs/pilot/attack-drill-protocol.md."
+        ),
+    )
     return parser
 
 
@@ -83,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         orchestration_config=arguments.orchestration_config,
         enforcement_config=arguments.enforcement_config,
         dashboard_directory=arguments.dashboard_directory,
+        drill_label=arguments.drill_label,
     )
     uvicorn.run(
         integrated.app,

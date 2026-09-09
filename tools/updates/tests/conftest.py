@@ -231,9 +231,12 @@ def update_fixture(tmp_path: Path):
     The dict is exactly the keyword arguments `tools.updates.run.run_update`
     takes, minus `scheduled_for` (the tests supply that themselves so they
     can vary it independently of when the segment completed).
+
+    Pass `single_participant=True` for the ADR-014 shape: one participant, no
+    impostor anywhere in the frozen corpus.
     """
 
-    def _make(*, segment_completed_at: datetime) -> dict:
+    def _make(*, segment_completed_at: datetime, single_participant: bool = False) -> dict:
         storage_settings = load_storage_settings(
             ROOT / "config/storage.pilot.yaml",
             workspace_root=ROOT,
@@ -246,7 +249,9 @@ def update_fixture(tmp_path: Path):
 
         user_id = "participant-01"
         impostor_id = "participant-02"
-        participant_ids = [user_id, impostor_id]
+        # ADR-014: with one participant the frozen corpus holds no impostor,
+        # so a candidate's FAR is unmeasurable and run_update must refuse.
+        participant_ids = [user_id] if single_participant else [user_id, impostor_id]
 
         all_windows = []
         for index, participant_id in enumerate(participant_ids):

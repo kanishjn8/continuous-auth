@@ -62,12 +62,19 @@ def create_collection_application(
     orchestration_config: Path,
     enforcement_config: Path | None = None,
     dashboard_directory: Path | None = None,
+    drill_label: str | None = None,
 ) -> IntegratedApplication:
     """Build the end-to-end runtime for one participant or synthetic user.
 
     What the run produces is decided entirely by ``storage_config``: an
     approved-collection profile records real PILOT data, a synthetic-only
     profile records SYNTHETIC development data. This function never chooses.
+
+    ``drill_label`` declares the whole run a live attacker drill (ADR-014).
+    Its windows are scored, risk-assessed, escalated and enforced exactly as
+    normal -- and are permanently excluded from every training, calibration,
+    validation, enrollment and update corpus. It is opt-in and per-process:
+    never pass it for genuine collection.
     """
 
     if not participant_id.strip() or not local_secret:
@@ -116,6 +123,7 @@ def create_collection_application(
         update_manager=update_manager,
         anchor_scheduler=anchor_scheduler,
         challenge_service=challenge_service,
+        drill_label=drill_label,
     )
     backend = SQLiteApiBackend(
         storage,

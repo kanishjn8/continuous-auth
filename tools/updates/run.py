@@ -18,7 +18,25 @@ workflow design): reducing them so a five-day collection round could
 produce a promotion would weaken a guardrail purely to make the pipeline
 run on a schedule that does not honestly support it.
 
-Consequence, spelled out because it is easy to mistake for a bug: a
+**Status for this pilot: model updates are DISABLED (ADR-014), and this
+module refuses before doing anything.** An update may only replace an active
+profile when it is shown not to have raised FAR; FAR needs impostor evidence;
+a single-participant frozen corpus has none, and the live attacker drill --
+this project's only impostor evidence -- is excluded from every corpus by
+design. A candidate's FAR is therefore unmeasurable *by construction*, so
+``run_update`` returns ``SKIPPED`` / ``UPDATE_REQUIRES_IMPOSTOR_COHORT``
+before training anything and before writing any artifact. The corresponding
+refusal one layer down is ``UpdateManager._validate``'s
+``VALIDATION_FAR_UNMEASURED``.
+
+That refusal is the correct outcome, not a limitation to work around. The
+alternative would be relaxing ``quarantine_days``,
+``retraining_cadence_days``, ``regression_tolerance``, or the G1-G6 gates so
+that a disabled feature could run -- weakening the exact safeguard PLAN.md
+Section 12 claims as a contribution. Nothing here is weakened.
+
+Consequence of the quarantine settings, spelled out separately because it is
+easy to mistake for a bug and applies whenever a cohort DOES exist: a
 five-day collection round produces **no live promotion**. Every segment
 quarantined during days 1-5 clears G5 only on quarantined_at + 7 days, i.e.
 day 8 at the earliest -- after the round has already ended. Running this
@@ -251,9 +269,30 @@ def run_update(
     ``update_settings`` defaults to ``config/updates.development.yaml`` (see
     the module docstring for why no pilot variant exists), keeping
     ``quarantine_days`` and ``retraining_cadence_days`` at 7.
+
+    Returns ``SKIPPED`` / ``UPDATE_REQUIRES_IMPOSTOR_COHORT`` immediately,
+    before any training or artifact write, when the frozen corpus holds only
+    one participant. See the module docstring.
     """
 
     settings = update_settings if update_settings is not None else load_update_settings()
+
+    # Refuse BEFORE building an UpdateManager, before any training runs, and
+    # before any artifact reaches disk. An update may only replace an active
+    # profile when it is shown not to have raised FAR, and FAR needs impostor
+    # evidence. A single-participant frozen corpus contains none -- and this
+    # project's only impostor evidence, the live attacker drill, is excluded
+    # from every corpus by design (ADR-014). The measurement is therefore
+    # impossible by construction, so refusing is the correct answer rather
+    # than a limitation to route around.
+    #
+    # Failing here, rather than deep inside build_candidate after .joblib
+    # files have already been written, also means a refused run leaves no
+    # orphan artifacts behind.
+    validation_corpus = corpus_module.load_frozen_corpus(database, manifest, "VALIDATION")
+    if len(validation_corpus.windows_by_user) < 2:
+        return UpdateRunOutcome("", "SKIPPED", "UPDATE_REQUIRES_IMPOSTOR_COHORT", None)
+
     repository = SQLiteUpdateRepository(storage)
     manager = UpdateManager(settings, repository)
     context = UpdateRunContext(

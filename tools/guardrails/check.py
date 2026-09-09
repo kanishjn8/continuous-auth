@@ -235,6 +235,42 @@ def check_admission_boundaries_present(path: str, text: str) -> list[Finding]:
     return []
 
 
+#: Corpus loaders: every reader of feature_windows whose output can reach
+#: training, calibration, validation, enrollment, a freeze manifest, or an
+#: update candidate. ADR-014 requires each of them to exclude declared
+#: attacker-drill sessions.
+_CORPUS_LOADERS = (
+    "tools/collection/repository.py",
+    "tools/collection/corpus.py",
+    "tools/demo/bootstrap_first_model.py",
+    "ml/experiments/app_usage_study.py",
+    "backend/app/runtime/orchestrator.py",
+)
+
+
+def check_drill_exclusion(path: str, text: str) -> list[Finding]:
+    """G12: corpus loaders must exclude declared attacker-drill sessions.
+
+    A regex cannot prove the filter is correct -- backend/tests/
+    test_attack_drill.py does that, behaviourally, on a real database. This
+    catches the filter being deleted, which is the realistic regression: a
+    future edit rewrites a query and quietly drops the WHERE clause.
+    """
+
+    if path not in _CORPUS_LOADERS:
+        return []
+    if "FROM feature_windows" not in text:
+        return []
+    if "DRILL_EXCLUSION" in text or "drill_sessions" in text:
+        return []
+    return _finding(
+        "G12_DRILL_EXCLUSION",
+        path,
+        "corpus loader reads feature_windows without excluding drill_sessions "
+        "(see backend/app/storage/drill.py)",
+    )
+
+
 def check_shared_feature_consumer(path: str, text: str) -> list[Finding]:
     if re.search(r"\b(def|function)\s+(extract|compute|build)_.*feature", text, re.I):
         return _finding(
@@ -384,6 +420,7 @@ def scan_repository() -> list[Finding]:
             findings.extend(check_shared_feature_consumer(path_text, text))
         if path_text.startswith("backend/app/models/"):
             findings.extend(check_model_loader(path_text, text))
+        findings.extend(check_drill_exclusion(path_text, text))
 
     gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     if not re.search(r"(?m)^data/\s*$", gitignore):
@@ -405,7 +442,7 @@ def main() -> int:
         print(f"guardrails failed: {len(findings)} violation(s)")
         return 1
     if not args.quiet:
-        print("guardrails passed: G01-G11")
+        print("guardrails passed: G01-G12")
     return 0
 
 

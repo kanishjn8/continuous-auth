@@ -2,7 +2,7 @@
 
 Why this script exists
 -----------------------
-The live runtime (``backend/app/runtime/orchestrator.py::_progress_state``)
+The live runtime (``backend/app/runtime/orchestrator.py::_progress_enrollment_and_calibration``)
 never advances a user out of ``ENROLLING`` unless
 ``DirectoryProfileProvider`` already resolves an ``ACTIVE`` row in
 ``model_profiles`` for that user -- see ``backend/app/runtime/profiles.py``.
@@ -84,19 +84,25 @@ from ml.features.config import load_config as load_ml_config
 from ml.features.schema import FeatureWindow
 from ml.training.isolation_forest import train_user_profile
 from ml.training.persistence import save_artifact
+from backend.app.storage.drill import DRILL_EXCLUSION_PREDICATE, require_drill_table
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def _load_windows(storage: StorageService, user_id: str) -> list[FeatureWindow]:
     with storage.database.connection() as connection:
+        require_drill_table(connection)
         rows = connection.execute(
-            """
+            f"""
             SELECT window_id, user_id, session_id, segment_id, t_start_us, t_end_us,
                    quality_label, key_event_count, mouse_event_count, collection_day,
                    provenance, keyboard_features_json, mouse_features_json, context_json,
                    schema_version
-            FROM feature_windows WHERE user_id = ?
+            FROM feature_windows
+            -- This demo path trains directly from feature_windows without a
+            -- freeze manifest, so it is the one training route with no
+            -- manifest to fall back on. It filters drills itself (ADR-014).
+            WHERE user_id = ? AND {DRILL_EXCLUSION_PREDICATE}
             """,
             (user_id,),
         ).fetchall()

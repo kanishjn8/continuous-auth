@@ -4,6 +4,7 @@ from tools.guardrails.check import (
     check_app_specific_model,
     check_collector_privacy,
     check_data_tracking,
+    check_drill_exclusion,
     check_hardcoded_tunables,
     check_model_loader,
     check_monitoring_invariants,
@@ -116,3 +117,33 @@ def test_other_files_are_not_required_to_reference_both() -> None:
     from tools.guardrails.check import check_admission_boundaries_present
 
     assert check_admission_boundaries_present("ml/training/other.py", "nothing") == []
+
+
+def test_g12_rejects_a_corpus_loader_that_drops_the_drill_filter() -> None:
+    findings = check_drill_exclusion(
+        "tools/collection/repository.py",
+        "SELECT window_id FROM feature_windows ORDER BY user_id",
+    )
+    assert [finding.rule for finding in findings] == ["G12_DRILL_EXCLUSION"]
+
+
+def test_g12_accepts_a_corpus_loader_that_keeps_the_drill_filter() -> None:
+    assert (
+        check_drill_exclusion(
+            "tools/collection/corpus.py",
+            "SELECT window_id FROM feature_windows "
+            "WHERE session_id NOT IN (SELECT session_id FROM drill_sessions)",
+        )
+        == []
+    )
+
+
+def test_g12_ignores_files_that_are_not_corpus_loaders() -> None:
+    """Retention and provenance lookups must keep seeing drill windows."""
+    assert (
+        check_drill_exclusion(
+            "backend/app/storage/retention.py",
+            "DELETE FROM feature_windows WHERE stored_at_utc < ?",
+        )
+        == []
+    )
