@@ -41,7 +41,16 @@ model is live, all subsequent updates MUST go through
 either; that remains a separate follow-up). The resulting ``ValidationReport``
 FAR/FRR fields are structurally required by ``ModelProfile`` but are NOT a
 real accuracy measurement: there is no held-out day and no impostor data to
-compute them against here. Do not cite them as evidence of anything.
+compute them against here. FAR is written as ``None`` (NOT MEASURED) rather
+than as a fabricated ``0.0``; the FRR float is a structural placeholder and
+``operating_point`` says so. Do not cite either as evidence of anything.
+
+For real participant data use ``python -m tools.enrollment activate``
+instead, which goes through the ADR-013 enrollment admission gate and
+measures FRR for real. Note also that this script cannot be used on
+``TEAM``/``PILOT`` data: ``ml/training/gate.py::require_promotion_gate``
+rejects participant provenance without a promoted candidate, which is
+exactly the boundary it exists to hold.
 This mirrors the same "demo-only, not used by tests or evaluation" spirit as
 ``config/risk.demo-live-single-day.yaml``.
 
@@ -207,7 +216,13 @@ def main(argv: list[str] | None = None) -> int:
         mouse_artifact.checksum if mouse_artifact else None,
     )
 
-    placeholder_metrics = ValidationMetrics(false_rejection_rate=0.0, false_acceptance_rate=0.0)
+    # Nothing here was measured. FRR needs a held-out day and FAR needs
+    # impostor data; this demo path has neither. FAR is therefore recorded as
+    # None -- NOT MEASURED -- rather than as a fabricated 0.0 that would be
+    # indistinguishable downstream from a real perfect score (ADR-014). FRR
+    # keeps its structurally required float, and the reason code and
+    # operating_point say plainly that it is a placeholder.
+    placeholder_metrics = ValidationMetrics(false_rejection_rate=0.0, false_acceptance_rate=None)
     profile = ModelProfile(
         profile_version=profile_version,
         user_id=args.user_id,
@@ -219,6 +234,11 @@ def main(argv: list[str] | None = None) -> int:
             code="BOOTSTRAP_INITIAL_ENROLLMENT_NO_BASELINE",
             baseline=placeholder_metrics,
             candidate=placeholder_metrics,
+            operating_point=(
+                "synthetic demo bootstrap: frr is a structural placeholder and was "
+                "not measured; far=unmeasured (no held-out day, no impostor data). "
+                "Cite neither."
+            ),
         ),
         created_at=datetime.now(UTC),
     )

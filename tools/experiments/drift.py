@@ -258,8 +258,10 @@ def run_drift_benefit(
         enrollment=enrollments.get(user_id),
         manifest_window_ids=train_corpus.manifest_window_ids,
         observed_at_by_window=train_corpus.observed_at_by_window,
-        min_windows=risk_settings.enrollment.min_windows,
-        min_distinct_days=risk_settings.enrollment.min_distinct_days,
+        # TRAIN-scoped, from the ML config -- not the live state-machine
+        # thresholds in config/risk.*.yaml (ADR-014).
+        min_train_windows=int(ml_config.raw["enrollment"]["min_train_windows"]),
+        min_train_distinct_days=int(ml_config.raw["enrollment"]["min_train_distinct_days"]),
         user_has_active_profile=_has_active_profile(storage, user_id),
         participant_id=user_id,
     )

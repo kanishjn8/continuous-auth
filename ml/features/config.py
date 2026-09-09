@@ -82,6 +82,7 @@ def load_config(path: Path | str | None = None) -> MLConfig:
         isof = raw["isolation_forest"]
         maha = raw["mahalanobis_baseline"]
         ocsvm = raw["one_class_svm_baseline"]
+        enr = raw["enrollment"]
     except KeyError as e:
         raise ConfigError(f"missing required config section: {e}") from e
 
@@ -115,6 +116,12 @@ def load_config(path: Path | str | None = None) -> MLConfig:
     _require_positive(isof["n_estimators"], "isolation_forest.n_estimators")
     _require_positive(maha["ridge"], "mahalanobis_baseline.ridge")
     _require_positive(ocsvm["nu"], "one_class_svm_baseline.nu")
+    # ADR-014 first-profile training-admission policy, scoped to the frozen
+    # TRAIN partition. Deliberately separate from the live state-machine
+    # thresholds in config/risk.*.yaml, which are counted over the user's
+    # whole observed history and answer a different question.
+    _require_positive(enr["min_train_windows"], "enrollment.min_train_windows")
+    _require_positive(enr["min_train_distinct_days"], "enrollment.min_train_distinct_days")
 
     return MLConfig(
         windowing=WindowingConfig(

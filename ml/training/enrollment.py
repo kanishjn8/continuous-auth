@@ -50,8 +50,17 @@ class EnrollmentAdmission:
     enrollment: EnrollmentRecord | None
     manifest_window_ids: frozenset[str]
     observed_at_by_window: Mapping[str, datetime]
-    min_windows: int
-    min_distinct_days: int
+    #: Scoped to the frozen TRAIN partition, not to the whole corpus and not
+    #: to the user's live history. The live state machine's own thresholds
+    #: live in ``config/risk.*.yaml -> enrollment.*`` and answer a different
+    #: question ("how much has the runtime observed before this user stops
+    #: being ENROLLING?"). Conflating the two silently turned a "3 distinct
+    #: days" rule into an undocumented "6 collection days" requirement,
+    #: because a 60/20/20 day-disjoint freeze gives TRAIN roughly half the
+    #: collected days. These come from ``config/ml.*.yaml -> enrollment.*``
+    #: (ADR-014).
+    min_train_windows: int
+    min_train_distinct_days: int
     user_has_active_profile: bool
     participant_id: str
 
@@ -110,12 +119,14 @@ def require_enrollment_admission(
                 f"{','.join(reasons)}: window {window.window_id!r} is not " "evaluation-eligible"
             )
 
-    if len(windows) < admission.min_windows:
+    if len(windows) < admission.min_train_windows:
         raise EnrollmentAdmissionError(
-            f"INSUFFICIENT_WINDOWS: {len(windows)} < {admission.min_windows}"
+            f"INSUFFICIENT_WINDOWS: {len(windows)} TRAIN-partition windows < "
+            f"min_train_windows={admission.min_train_windows}"
         )
     distinct_days = {window.collection_day for window in windows}
-    if len(distinct_days) < admission.min_distinct_days:
+    if len(distinct_days) < admission.min_train_distinct_days:
         raise EnrollmentAdmissionError(
-            f"INSUFFICIENT_DISTINCT_DAYS: {len(distinct_days)} < " f"{admission.min_distinct_days}"
+            f"INSUFFICIENT_DISTINCT_DAYS: {len(distinct_days)} distinct TRAIN-partition "
+            f"days < min_train_distinct_days={admission.min_train_distinct_days}"
         )

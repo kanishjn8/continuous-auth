@@ -46,11 +46,18 @@ class SegmentEvidence:
 @dataclass(frozen=True)
 class ValidationMetrics:
     false_rejection_rate: float
-    false_acceptance_rate: float
+    #: ``None`` means NOT MEASURED -- there was no impostor evidence to measure
+    #: against. It never means "zero". A false-acceptance rate requires impostor
+    #: data, and a single-participant corpus contains none by construction
+    #: (ADR-014). Any consumer that needs a FAR comparison must refuse rather
+    #: than substitute a value; see ``UpdateManager._validate``.
+    false_acceptance_rate: float | None
 
     def __post_init__(self) -> None:
         if not 0 <= self.false_rejection_rate <= 1:
             raise ValueError("false rejection rate must be in [0, 1]")
+        if self.false_acceptance_rate is None:
+            return
         if not 0 <= self.false_acceptance_rate <= 1:
             raise ValueError("false acceptance rate must be in [0, 1]")
 
@@ -61,6 +68,11 @@ class ValidationReport:
     code: str
     baseline: ValidationMetrics
     candidate: ValidationMetrics
+    #: Free-form audit string naming the operating point the metrics were
+    #: measured at, and stating plainly when FAR was not measured. Serialised
+    #: into the existing ``model_profiles.validation_json`` column, so it needs
+    #: no migration; profiles written before it existed load with "".
+    operating_point: str = ""
 
 
 @dataclass(frozen=True)
@@ -266,20 +278,39 @@ class UpdateManager:
 
     def _validate(self, build: CandidateBuild) -> ValidationReport:
         tolerance = self.settings.update_manager.regression_tolerance
+        baseline_far = build.baseline_metrics.false_acceptance_rate
+        candidate_far = build.candidate_metrics.false_acceptance_rate
+        if baseline_far is None or candidate_far is None:
+            # An update may only replace an active profile when it is shown not
+            # to have raised FAR. With FAR unmeasured on either side that
+            # showing is impossible, so the honest answer is refusal -- never a
+            # substituted zero (PLAN.md P7: adaptation must be earned).
+            #
+            # Enrollment is deliberately asymmetric with this: a FIRST profile
+            # may activate with FAR unmeasured, because there is no prior
+            # profile to regress against and its acceptance criterion is the
+            # ADR-013 enrollment gate instead. See ADR-014.
+            return ValidationReport(
+                accepted=False,
+                code="VALIDATION_FAR_UNMEASURED",
+                baseline=build.baseline_metrics,
+                candidate=build.candidate_metrics,
+                operating_point=(
+                    "far unmeasured on at least one side; regression undecidable"
+                ),
+            )
         frr_regression = (
             build.candidate_metrics.false_rejection_rate
             - build.baseline_metrics.false_rejection_rate
         )
-        far_regression = (
-            build.candidate_metrics.false_acceptance_rate
-            - build.baseline_metrics.false_acceptance_rate
-        )
+        far_regression = candidate_far - baseline_far
         accepted = frr_regression <= tolerance and far_regression <= tolerance
         return ValidationReport(
             accepted=accepted,
             code="VALIDATION_PASSED" if accepted else "VALIDATION_REGRESSION",
             baseline=build.baseline_metrics,
             candidate=build.candidate_metrics,
+            operating_point="pooled-EER threshold on VALIDATION with cross-user impostors",
         )
 
     def run_scheduled(

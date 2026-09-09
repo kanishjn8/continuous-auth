@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from backend.app.decisions import VerificationRecord
 from backend.app.updates import (
     CandidateBuild,
@@ -200,3 +202,84 @@ def test_failed_builder_keeps_promoted_candidate_for_a_future_scheduled_retry() 
     )
     assert outcome.status == "FAILED"
     assert repository.candidates["candidate-1"].disposition is CandidateDisposition.PROMOTED
+
+
+def test_validation_metrics_accepts_unmeasured_far() -> None:
+    """``None`` means NOT MEASURED. It is a legal value; ``0.0`` is a claim."""
+    metrics = ValidationMetrics(false_rejection_rate=0.12, false_acceptance_rate=None)
+    assert metrics.false_acceptance_rate is None
+    assert metrics.false_acceptance_rate != 0.0
+
+
+def test_validation_metrics_still_range_checks_a_measured_far() -> None:
+    with pytest.raises(ValueError, match="false acceptance rate"):
+        ValidationMetrics(false_rejection_rate=0.1, false_acceptance_rate=1.5)
+
+
+def test_update_is_rejected_when_far_is_unmeasured() -> None:
+    """An update means "not worse than the active profile".
+
+    Without a FAR on both sides that comparison is undecidable, so the honest
+    answer is refusal -- never a substituted zero.
+    """
+    manager = UpdateManager(load_update_settings(), MemoryUpdateRepository())
+    build = CandidateBuild(
+        profile_version="v2",
+        keyboard_artifact_version="keyboard-2",
+        keyboard_checksum="a" * 64,
+        mouse_artifact_version=None,
+        mouse_checksum=None,
+        baseline_metrics=ValidationMetrics(0.10, None),
+        candidate_metrics=ValidationMetrics(0.09, None),
+    )
+    report = manager._validate(build)
+    assert report.accepted is False
+    assert report.code == "VALIDATION_FAR_UNMEASURED"
+
+
+def test_update_is_rejected_when_only_one_side_has_a_measured_far() -> None:
+    manager = UpdateManager(load_update_settings(), MemoryUpdateRepository())
+    build = CandidateBuild(
+        profile_version="v2",
+        keyboard_artifact_version="keyboard-2",
+        keyboard_checksum="a" * 64,
+        mouse_artifact_version=None,
+        mouse_checksum=None,
+        baseline_metrics=ValidationMetrics(0.10, 0.05),
+        candidate_metrics=ValidationMetrics(0.09, None),
+    )
+    report = manager._validate(build)
+    assert report.accepted is False
+    assert report.code == "VALIDATION_FAR_UNMEASURED"
+
+
+def test_unmeasured_far_rejects_the_run_without_activating() -> None:
+    repository = MemoryUpdateRepository()
+    manager = UpdateManager(
+        load_update_settings(), repository, candidate_id_factory=lambda: "candidate-1"
+    )
+    candidate = manager.submit_segment(_evidence())
+    repository.candidates[candidate.candidate_id] = manager.reassess(
+        candidate, now=datetime(2026, 1, 8, tzinfo=UTC), scheduled_run=True
+    )
+
+    def build(user_id: str, promoted: tuple[UpdateCandidate, ...]) -> CandidateBuild:
+        del user_id, promoted
+        return CandidateBuild(
+            profile_version="unmeasurable",
+            keyboard_artifact_version="keyboard-2",
+            keyboard_checksum="d" * 64,
+            mouse_artifact_version=None,
+            mouse_checksum=None,
+            baseline_metrics=ValidationMetrics(0.10, None),
+            candidate_metrics=ValidationMetrics(0.09, None),
+        )
+
+    outcome = manager.run_scheduled(
+        user_id="synthetic-user",
+        scheduled_for=datetime(2026, 1, 8, tzinfo=UTC),
+        candidate_builder=build,
+    )
+    assert outcome.status == "REJECTED"
+    assert outcome.code == "VALIDATION_FAR_UNMEASURED"
+    assert repository.active is None

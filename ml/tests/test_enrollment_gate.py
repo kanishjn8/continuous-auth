@@ -117,8 +117,8 @@ def _admission(windows, **overrides):
         observed_at_by_window={
             w.window_id: CONSENTED + timedelta(hours=index) for index, w in enumerate(windows)
         },
-        min_windows=20,
-        min_distinct_days=3,
+        min_train_windows=20,
+        min_train_distinct_days=2,
         user_has_active_profile=False,
         participant_id="participant-01",
     )
@@ -292,3 +292,30 @@ def test_promotion_gate_source_is_unmodified() -> None:
         "SHA-256 (line endings normalised to LF) and update "
         "_GATE_PY_SHA256 above."
     )
+
+
+def test_a_single_day_train_partition_is_refused() -> None:
+    """One day of TRAIN data represents no cross-day variation at all.
+
+    A single day's posture, device position, or mood would alone define the
+    identity baseline (ADR-014).
+    """
+    windows = _windows(days=1)
+    admission = _admission(windows, min_train_windows=20, min_train_distinct_days=2)
+    with pytest.raises(EnrollmentAdmissionError, match="INSUFFICIENT_DISTINCT_DAYS"):
+        require_enrollment_admission("participant-01", windows, admission)
+
+
+def test_a_two_day_train_partition_is_admitted_at_the_configured_policy() -> None:
+    windows = _windows(days=2)
+    admission = _admission(windows, min_train_windows=20, min_train_distinct_days=2)
+    require_enrollment_admission("participant-01", windows, admission)
+
+
+def test_the_train_day_policy_message_names_the_train_scope() -> None:
+    """The reason code must not be mistakable for the live-state threshold."""
+    windows = _windows(days=1)
+    admission = _admission(windows, min_train_distinct_days=2)
+    with pytest.raises(EnrollmentAdmissionError) as excinfo:
+        require_enrollment_admission("participant-01", windows, admission)
+    assert "TRAIN" in str(excinfo.value)

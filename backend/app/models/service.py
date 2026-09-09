@@ -67,6 +67,36 @@ class ScoringOutcome:
     issues: tuple[ScoringIssue, ...]
 
 
+def calibrated_risk_from_percentile(percentile: float) -> float:
+    """Map an ML normality percentile (0..100) onto the C3 risk scale (0..1).
+
+    This is the single definition of that mapping. Anything that needs to
+    reason about where the live system's decision boundaries fall on the
+    percentile scale must invert it with ``percentile_for_calibrated_risk``
+    rather than restating the arithmetic, so the two can never drift apart.
+    """
+
+    return 1.0 - percentile / 100.0
+
+
+def percentile_for_calibrated_risk(calibrated_risk: float) -> float:
+    """Inverse of :func:`calibrated_risk_from_percentile`.
+
+    ``RiskEngine._candidate_level`` counts a window as breaching a threshold
+    when ``calibrated_risk >= threshold``. Because the mapping is decreasing,
+    the equivalent condition on the percentile scale is
+    ``percentile <= percentile_for_calibrated_risk(threshold)`` -- note the
+    inclusive comparison flips sides, which matters exactly at the boundary.
+
+    Used by ``tools/enrollment/activate.py`` to measure a first profile's FRR
+    at the operating point the deployed system actually uses, rather than at
+    an Equal Error Rate point that a single-participant corpus cannot produce
+    (ADR-014).
+    """
+
+    return (1.0 - calibrated_risk) * 100.0
+
+
 def _unavailable(status: ModelStatus) -> ModalityScore:
     return ModalityScore(
         available=False,

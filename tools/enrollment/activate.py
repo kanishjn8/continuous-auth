@@ -7,15 +7,39 @@ Two honest differences from the demo bootstrap:
 
 * Training data passes the ADR-013 enrollment admission gate rather than
   skipping the boundary because its provenance happens to be SYNTHETIC.
-* The activation ValidationReport carries measured numbers. FRR comes from the
-  held-out VALIDATION partition and FAR from zero-effort cross-evaluation
-  against other participants. The EVALUATION partition is never read: it is
-  reserved for the headline result, and touching it here would make that
-  result untrustworthy.
+* The activation ValidationReport carries only numbers that were actually
+  measured. There are two paths, chosen automatically by whether the frozen
+  manifest contained another participant -- no flag, no config, no operator
+  choice:
+
+  - **Cohort present.** FRR and FAR are both measured on the held-out
+    VALIDATION partition at the pooled Equal Error Rate threshold, FAR by
+    zero-effort cross-evaluation against the other participants. Reason code
+    ``ENROLLMENT_INITIAL_PROFILE_NO_BASELINE``.
+  - **No cohort (ADR-014, the delivered single-participant build).** FRR is
+    measured on the same held-out partition, at the operating point the
+    deployed system actually uses (``risk.medium_threshold`` on the
+    calibrated risk scale). FAR is recorded as ``None``, meaning **not
+    measured** -- a false-acceptance rate needs impostor data, and a
+    single-participant corpus contains none. It is never ``0.0``, never
+    estimated, never imputed. Reason code
+    ``ENROLLMENT_INITIAL_PROFILE_NO_IMPOSTOR_COHORT``.
+
+  Genuine scores are mandatory in both paths: no scorable VALIDATION window
+  raises ``ENROLLMENT_VALIDATION_NO_GENUINE`` and activation stops.
+
+  The EVALUATION partition is never read: it is reserved for the headline
+  result, and touching it here would make that result untrustworthy.
 
 The reason code states plainly that no prior profile existed to regress
-against. That is a fact about enrollment, not a defect, and it must not be
-disguised as a passing regression check.
+against, and ``ValidationReport.operating_point`` states plainly where the
+numbers came from and what was not measured. Those are facts about
+enrollment, not defects, and they must not be disguised as a passing
+regression check.
+
+Artifacts are written to disk only after validation has succeeded, so a
+failed activation leaves no orphaned ``.joblib`` with no database row
+pointing at it.
 
 Two configuration gaps are deliberately left open rather than papered over:
 
@@ -46,6 +70,7 @@ from pathlib import Path
 
 import numpy as np
 
+from backend.app.models.service import percentile_for_calibrated_risk
 from backend.app.risk.config import RiskSettings, load_risk_settings
 from backend.app.storage.config import load_storage_settings
 from backend.app.storage.service import StorageService
@@ -94,25 +119,49 @@ def _measure_validation_metrics(
     participant_id: str,
     profile: dict[str, ModelArtifact],
     validation_windows_by_user: dict[str, list],
-) -> ValidationMetrics:
-    """Measure real FRR/FAR on VALIDATION: never fabricated, never guessed.
+    *,
+    medium_threshold: float,
+) -> tuple[ValidationMetrics, str]:
+    """Measure FRR always; measure FAR only when impostor evidence exists.
 
-    FRR: the fraction of the participant's own held-out VALIDATION windows
-    that a fresh-from-training model would reject. FAR: the fraction of
-    every other participant's VALIDATION windows the same model would
-    (falsely) accept, via the existing zero-effort cross-evaluation.
+    Genuine scores are **mandatory**: a VALIDATION partition that cannot
+    produce one is a data problem and must stop activation. Impostor scores
+    are **not** mandatory, because a single-participant corpus can never
+    contain any -- and an absent cohort is a fact to record, never a number
+    to invent (ADR-014).
 
     Every trained modality (keyboard, mouse, or both) contributes its
-    percentile scores to one pooled genuine/impostor pair. Percentile
-    scores share one calibrated 0-100 scale by construction
-    (``ml/calibration/percentile.py``), so pooling scores across modalities
-    before finding a single operating point is a legitimate combination,
-    not an apples-to-oranges average -- and it avoids inventing a
-    keyboard/mouse fusion weight that ADR-013 and this brief never specify.
-    The operating threshold is the Equal Error Rate point on that pooled
-    evidence -- an evaluation convention already established in
-    ``ml/evaluation/pipeline.py`` -- not a security policy value pulled from
-    an as-yet-unapproved pilot risk config.
+    percentile scores to one pooled genuine/impostor pair. Percentile scores
+    share one calibrated 0-100 scale by construction
+    (``ml/calibration/percentile.py``), so pooling across modalities before
+    finding a single operating point is a legitimate combination, not an
+    apples-to-oranges average -- and it avoids inventing a keyboard/mouse
+    fusion weight that ADR-013 never specifies.
+
+    **With impostors** the operating threshold is the Equal Error Rate point
+    on that pooled evidence -- an evaluation convention already established
+    in ``ml/evaluation/pipeline.py`` -- and both rates are measured.
+
+    **Without impostors there is no EER**, so FRR is measured at the
+    operating point the deployed system actually uses. The chain is:
+
+        ml/calibration/percentile.py      -> normality percentile, 0..100
+        backend/app/models/service.py     -> calibrated_risk = 1 - pct/100
+        RiskEngine._fusion                -> availability-weighted mean
+        RiskEngine._candidate_level       -> breach when value >= medium_threshold
+
+    so a window breaches MEDIUM exactly when its percentile is **at or
+    below** ``percentile_for_calibrated_risk(medium_threshold)``. The
+    inclusive comparison flips sides with the decreasing mapping, which is
+    why the boundary case is asserted in the tests.
+
+    One honest limitation, which belongs next to the number wherever it is
+    reported: this is the **per-window** rate at the deployed threshold. The
+    live engine additionally applies context confidence, EWMA smoothing, and
+    K-of-N breach counting before it raises a risk level, all of which
+    suppress isolated breaches. The measured value is therefore an upper
+    bound on the rate at which the live system would actually escalate, not
+    an estimate of it.
     """
 
     genuine: list[float] = []
@@ -127,21 +176,54 @@ def _measure_validation_metrics(
         genuine.extend(result.genuine_scores)
         impostor.extend(result.all_impostor_scores().tolist())
 
-    if not genuine or not impostor:
+    if not genuine:
         raise ValueError(
-            "ENROLLMENT_VALIDATION_INSUFFICIENT: no genuine and/or impostor "
-            f"VALIDATION-partition scores were available for participant "
-            f"{participant_id!r} to measure FRR/FAR; enrollment cannot be "
-            "activated without a real validation measurement"
+            "ENROLLMENT_VALIDATION_NO_GENUINE: no scorable VALIDATION-partition "
+            f"windows were available for participant {participant_id!r}; a first "
+            "profile is never activated without a real genuine measurement. This "
+            "is a data problem, not a cohort problem -- check the freeze manifest's "
+            "VALIDATION partition and the quality gate."
         )
 
     genuine_arr = np.asarray(genuine, dtype=float)
-    impostor_arr = np.asarray(impostor, dtype=float)
-    eer = compute_eer(genuine_arr, impostor_arr)
-    rates = compute_far_frr(genuine_arr, impostor_arr, eer.threshold)
-    return ValidationMetrics(
-        false_rejection_rate=rates.frr,
-        false_acceptance_rate=rates.far,
+    if impostor:
+        impostor_arr = np.asarray(impostor, dtype=float)
+        eer = compute_eer(genuine_arr, impostor_arr)
+        rates = compute_far_frr(genuine_arr, impostor_arr, eer.threshold)
+        return (
+            ValidationMetrics(
+                false_rejection_rate=rates.frr,
+                false_acceptance_rate=rates.far,
+            ),
+            "pooled-EER threshold on VALIDATION with cross-user impostors",
+        )
+
+    return _frr_at_deployed_operating_point(genuine_arr, medium_threshold)
+
+
+def _frr_at_deployed_operating_point(
+    genuine_percentiles: np.ndarray,
+    medium_threshold: float,
+) -> tuple[ValidationMetrics, str]:
+    """FRR at the live MEDIUM boundary, with FAR explicitly unmeasured.
+
+    Split out from :func:`_measure_validation_metrics` so the boundary
+    semantics can be asserted directly, without stubbing the scorer: the
+    comparison is **inclusive** and on the *low* side of the percentile
+    scale, because ``calibrated_risk = 1 - percentile/100`` is decreasing and
+    ``RiskEngine._candidate_level`` breaches on ``>=``.
+    """
+
+    percentile_threshold = percentile_for_calibrated_risk(medium_threshold)
+    frr = float(np.mean(genuine_percentiles <= percentile_threshold))
+    operating_point = (
+        f"frr@calibrated_risk>={medium_threshold:.3f} (risk.medium_threshold; "
+        f"percentile<={percentile_threshold:.3f}), per-window before smoothing "
+        "and K-of-N; far=unmeasured (no impostor cohort in the frozen manifest)"
+    )
+    return (
+        ValidationMetrics(false_rejection_rate=frr, false_acceptance_rate=None),
+        operating_point,
     )
 
 
@@ -184,8 +266,14 @@ def activate_first_profile(
         enrollment=enrollments.get(participant_id),
         manifest_window_ids=train_corpus.manifest_window_ids,
         observed_at_by_window=train_corpus.observed_at_by_window,
-        min_windows=risk_settings.enrollment.min_windows,
-        min_distinct_days=risk_settings.enrollment.min_distinct_days,
+        # TRAIN-scoped training-admission policy, from the ML config. These
+        # used to be sourced from risk_settings.enrollment.*, which is the
+        # LIVE state-machine policy counted over the user's whole observed
+        # history -- a different question with a different correct answer.
+        # Applying it to a 60/20/20 TRAIN partition silently demanded roughly
+        # twice as many collection days as any document stated (ADR-014).
+        min_train_windows=int(ml_config.raw["enrollment"]["min_train_windows"]),
+        min_train_distinct_days=int(ml_config.raw["enrollment"]["min_train_distinct_days"]),
         user_has_active_profile=has_active_profile,
         participant_id=participant_id,
     )
@@ -204,6 +292,18 @@ def activate_first_profile(
     keyboard_artifact = profile_artifacts.get("keyboard")
     mouse_artifact = profile_artifacts.get("mouse")
 
+    # Measure BEFORE persisting anything. Training and calibration happen in
+    # memory above; if validation raises (no genuine VALIDATION windows, say),
+    # a failed activation must leave no .joblib on disk with no database row
+    # pointing at it. Artifacts are written below, immediately before the
+    # profile row that references them.
+    metrics, operating_point = _measure_validation_metrics(
+        participant_id,
+        profile_artifacts,
+        validation_corpus.windows_by_user,
+        medium_threshold=risk_settings.risk.medium_threshold,
+    )
+
     if keyboard_artifact is not None:
         save_artifact(
             keyboard_artifact,
@@ -215,10 +315,6 @@ def activate_first_profile(
             artifact_root / participant_id / f"{mouse_artifact.version}.joblib",
         )
 
-    metrics = _measure_validation_metrics(
-        participant_id, profile_artifacts, validation_corpus.windows_by_user
-    )
-
     profile_version = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%f")
     profile = ModelProfile(
         profile_version=profile_version,
@@ -227,16 +323,29 @@ def activate_first_profile(
         mouse_artifact_version=mouse_artifact.version if mouse_artifact else None,
         aggregate_checksum=_aggregate_checksum(profile_version, keyboard_artifact, mouse_artifact),
         validation=ValidationReport(
+            # accepted=True gates ACTIVATION, and a first profile's acceptance
+            # criterion is the ADR-013 enrollment gate (consent, corpus
+            # integrity, TRAIN volume and day coverage) that
+            # require_enrollment_admission already enforced above -- not a
+            # regression check, because there is no prior profile to regress
+            # against. An UPDATE means something different and refuses an
+            # unmeasured FAR outright; see
+            # backend/app/updates/manager.py::UpdateManager._validate.
             accepted=True,
-            code="ENROLLMENT_INITIAL_PROFILE_NO_BASELINE",
+            code=(
+                "ENROLLMENT_INITIAL_PROFILE_NO_BASELINE"
+                if metrics.false_acceptance_rate is not None
+                else "ENROLLMENT_INITIAL_PROFILE_NO_IMPOSTOR_COHORT"
+            ),
             # ValidationReport.baseline is structurally required, but there
             # is no prior profile for this participant to regress against --
             # this is their first profile. The same measured VALIDATION
             # metrics are therefore used for both baseline and candidate;
-            # the "_NO_BASELINE" reason code says so explicitly so this is
-            # never mistaken for a real prior-vs-candidate regression check.
+            # the reason code says so explicitly so this is never mistaken
+            # for a real prior-vs-candidate regression check.
             baseline=metrics,
             candidate=metrics,
+            operating_point=operating_point,
         ),
         created_at=datetime.now(UTC),
     )
@@ -299,7 +408,9 @@ def main(argv: list[str] | None = None) -> int:
                 "mouse_artifact_version": profile.mouse_artifact_version,
                 "validation_code": profile.validation.code,
                 "validation_frr": profile.validation.candidate.false_rejection_rate,
+                # null means NOT MEASURED, never zero. See the module docstring.
                 "validation_far": profile.validation.candidate.false_acceptance_rate,
+                "validation_operating_point": profile.validation.operating_point,
             },
             sort_keys=True,
         )

@@ -86,3 +86,35 @@ enrollment_experiment:
   # PLAN.md Section 10.5 enrollment-length experiment day counts.
   day_lengths: [1, 2, 3, 5, 7]
 
+
+# First-profile TRAINING-ADMISSION policy (ADR-013 gate, ADR-014 scoping).
+#
+# policy status: provisional, pending PLAN.md Section 10.5 (open decision O3).
+#
+# This is NOT the live state-machine threshold in config/risk.*.yaml. That one
+# asks "how much has the runtime observed before this user stops being
+# ENROLLING?" and is counted over the user's whole history. This one asks "how
+# much of the frozen TRAIN partition must a first model actually be built
+# from?" One key used to answer both questions, which silently turned a
+# "3 distinct days" rule into an undocumented "6 collection days" requirement,
+# because a 60/20/20 day-disjoint freeze gives TRAIN roughly half the
+# collected days.
+#
+# Policy: a first profile must be trained on at least two distinct calendar
+# days, so that a single day's posture, device position, or mood cannot alone
+# define the identity baseline. Fewer than two days represents no cross-day
+# variation at all. A higher number is not currently justified: Section 10.5's
+# enrollment-length experiment has not been run, and choosing one would be an
+# assumption dressed as a threshold.
+#
+# Consequence under config/collection.pilot.yaml's 60/20/20 freeze: a 4-day
+# collection round is admissible (TRAIN = 2 days); a 3-day round is not. That
+# the current corpus satisfies this is an OUTCOME of the policy, not its
+# purpose -- the sentence above must stand on its own.
+#
+# min_train_windows mirrors per_user_normalization.min_baseline_windows (20):
+# below that, no modality trains at all, so a lower value here could not admit
+# anything the trainer would accept.
+enrollment:
+  min_train_windows: 20
+  min_train_distinct_days: 2

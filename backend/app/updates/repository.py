@@ -31,6 +31,11 @@ def _profile_from_row(row: sqlite3.Row) -> ModelProfile:
         code=str(validation_data["code"]),
         baseline=ValidationMetrics(**validation_data["baseline"]),
         candidate=ValidationMetrics(**validation_data["candidate"]),
+        # Profiles written before operating_point existed still load. A JSON
+        # null false_acceptance_rate round-trips through ValidationMetrics
+        # unchanged and needs no migration: validation_json is free-form TEXT
+        # with only a json_valid() check.
+        operating_point=str(validation_data.get("operating_point", "")),
     )
     return ModelProfile(
         profile_version=str(values["profile_version"]),

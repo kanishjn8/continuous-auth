@@ -160,15 +160,18 @@ def _insert_active_profile(database: Path, user_id: str) -> None:
         )
 
 
-@pytest.fixture
-def enrollment_fixture(tmp_path: Path):
-    """Build a temporary pilot-profile database with two participants (a
-    second is required so FAR can be computed by cross-evaluation), freeze
-    it with the real ``build_freeze``, write administration records, and
-    return the keyword arguments ``activate_first_profile`` takes.
+def _build_fixture(tmp_path: Path, participant_ids: list[str], *, with_active_profile: bool):
+    """Build a temporary pilot-profile database, freeze it with the real
+    ``build_freeze``, write administration records, and return the keyword
+    arguments ``activate_first_profile`` takes.
+
+    ``participant_ids`` is the whole cohort. With two entries the frozen
+    manifest contains impostor evidence and activation takes its measured-FAR
+    path; with one it contains none and activation must record FAR as
+    unmeasured (ADR-014). The two paths are selected by the data alone.
     """
 
-    def _make(*, with_active_profile: bool = False) -> dict:
+    def _make() -> dict:
         from tools.collection.eligibility import ConsentRecord, EnrollmentRecord
         from tools.collection.freeze import build_freeze
         from tools.collection.repository import load_window_summaries
@@ -181,7 +184,6 @@ def enrollment_fixture(tmp_path: Path):
         storage = StorageService.open(storage_settings)
         database = storage_settings.database_path
 
-        participant_ids = ["participant-01", "participant-02"]
         all_windows = []
         for index, participant_id in enumerate(participant_ids):
             all_windows.extend(_pilot_windows(participant_id, seed=index + 1))
@@ -240,6 +242,36 @@ def enrollment_fixture(tmp_path: Path):
     return _make
 
 
+@pytest.fixture
+def enrollment_fixture(tmp_path: Path):
+    """Two participants: the frozen manifest contains impostor evidence."""
+
+    def _make(*, with_active_profile: bool = False) -> dict:
+        return _build_fixture(
+            tmp_path,
+            ["participant-01", "participant-02"],
+            with_active_profile=with_active_profile,
+        )()
+
+    return _make
+
+
+@pytest.fixture
+def single_participant_fixture(tmp_path: Path):
+    """One participant: the frozen manifest contains no impostor at all.
+
+    This is the delivered study's shape (ADR-014). Activation must succeed,
+    measure a real FRR, and record FAR as unmeasured.
+    """
+
+    def _make(*, with_active_profile: bool = False) -> dict:
+        return _build_fixture(
+            tmp_path, ["participant-01"], with_active_profile=with_active_profile
+        )()
+
+    return _make
+
+
 def test_refuses_a_user_who_already_has_an_active_profile(enrollment_fixture) -> None:
     from ml.training.enrollment import EnrollmentAdmissionError
     from tools.enrollment.activate import activate_first_profile
@@ -283,3 +315,158 @@ def test_the_activated_profile_is_readable_by_the_runtime(enrollment_fixture) ->
     activate_first_profile(**context)
     provider = DirectoryProfileProvider(context["storage"], context["artifact_root"])
     assert provider("participant-01") is not None
+
+
+def test_activates_a_single_participant_profile(single_participant_fixture) -> None:
+    """The delivered study's shape: one participant, no cohort, no impostor.
+
+    Activation must succeed on the strength of the ADR-013 enrollment gate
+    and a real FRR measurement (ADR-014).
+    """
+    from tools.enrollment.activate import activate_first_profile
+
+    profile = activate_first_profile(**single_participant_fixture())
+    assert profile.user_id == "participant-01"
+    assert profile.validation.accepted is True
+    assert profile.validation.code == "ENROLLMENT_INITIAL_PROFILE_NO_IMPOSTOR_COHORT"
+    assert profile.validation.candidate.false_acceptance_rate is None
+    assert 0.0 <= profile.validation.candidate.false_rejection_rate <= 1.0
+    assert "unmeasured" in profile.validation.operating_point
+    assert "risk.medium_threshold" in profile.validation.operating_point
+
+
+def test_far_is_never_fabricated_as_zero(single_participant_fixture) -> None:
+    """`None` means NOT MEASURED. `0.0` would be a claim nobody measured."""
+    from tools.enrollment.activate import activate_first_profile
+
+    profile = activate_first_profile(**single_participant_fixture())
+    far = profile.validation.candidate.false_acceptance_rate
+    assert far is None
+    assert far != 0.0
+    assert profile.validation.baseline.false_acceptance_rate is None
+
+
+def test_single_participant_profile_round_trips_a_null_far(single_participant_fixture) -> None:
+    """A JSON null FAR must survive model_profiles without a migration."""
+    from backend.app.updates.repository import _profile_from_row
+    from tools.enrollment.activate import activate_first_profile
+
+    context = single_participant_fixture()
+    activate_first_profile(**context)
+    with SQLiteDatabase(context["database"], busy_timeout_ms=5000).connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM model_profiles WHERE user_id = ? AND status = 'ACTIVE'",
+            ("participant-01",),
+        ).fetchone()
+    assert row is not None
+    stored = _profile_from_row(row)
+    assert stored.validation.candidate.false_acceptance_rate is None
+    assert stored.validation.code == "ENROLLMENT_INITIAL_PROFILE_NO_IMPOSTOR_COHORT"
+    assert "unmeasured" in stored.validation.operating_point
+
+
+def test_two_participant_corpus_still_measures_far(enrollment_fixture) -> None:
+    """The cohort path is unchanged and is selected by the data alone."""
+    from tools.enrollment.activate import activate_first_profile
+
+    profile = activate_first_profile(**enrollment_fixture())
+    assert profile.validation.code == "ENROLLMENT_INITIAL_PROFILE_NO_BASELINE"
+    assert profile.validation.candidate.false_acceptance_rate is not None
+    assert "EER" in profile.validation.operating_point
+
+
+def test_failed_validation_leaves_no_orphaned_artifact(
+    single_participant_fixture, monkeypatch
+) -> None:
+    """A failed activation must not leave a .joblib with no database row."""
+    from tools.enrollment import activate as activate_module
+
+    context = single_participant_fixture()
+
+    def _no_genuine(*args, **kwargs):
+        raise ValueError("ENROLLMENT_VALIDATION_NO_GENUINE: forced for this test")
+
+    monkeypatch.setattr(activate_module, "_measure_validation_metrics", _no_genuine)
+    with pytest.raises(ValueError, match="ENROLLMENT_VALIDATION_NO_GENUINE"):
+        activate_module.activate_first_profile(**context)
+
+    artifact_root = context["artifact_root"]
+    written = list(artifact_root.rglob("*.joblib")) if artifact_root.exists() else []
+    assert written == []
+
+    with SQLiteDatabase(context["database"], busy_timeout_ms=5000).connection() as connection:
+        rows = connection.execute("SELECT COUNT(*) AS n FROM model_profiles").fetchone()
+    assert rows["n"] == 0
+
+
+def test_frr_is_measured_at_the_deployed_operating_point() -> None:
+    """FRR must use the same boundary and comparison the live engine uses.
+
+    ``RiskEngine._candidate_level`` breaches when
+    ``calibrated_risk >= medium_threshold``, and models map
+    ``calibrated_risk = 1 - percentile/100``, so on the percentile scale the
+    breach condition is ``percentile <= threshold_pct`` -- inclusive, and on
+    the other side of the comparison, because the mapping is decreasing.
+    """
+    import numpy as np
+
+    from backend.app.models.service import percentile_for_calibrated_risk
+    from tools.enrollment.activate import _frr_at_deployed_operating_point
+
+    medium = 0.45
+    threshold_pct = percentile_for_calibrated_risk(medium)
+    assert threshold_pct == pytest.approx(55.0)
+
+    # Two of five sit at or below 55.0: 10.0, and exactly 55.0.
+    percentiles = np.asarray([10.0, 55.0, 55.000001, 80.0, 99.0], dtype=float)
+    metrics, operating_point = _frr_at_deployed_operating_point(percentiles, medium)
+
+    assert metrics.false_rejection_rate == pytest.approx(2 / 5)
+    assert metrics.false_acceptance_rate is None
+    assert "percentile<=55.000" in operating_point
+    assert "risk.medium_threshold" in operating_point
+
+
+def test_a_genuine_score_exactly_on_the_boundary_counts_as_rejected() -> None:
+    """The boundary is inclusive, matching ``value >= medium_threshold``."""
+    import numpy as np
+
+    from backend.app.models.service import percentile_for_calibrated_risk
+    from tools.enrollment.activate import _frr_at_deployed_operating_point
+
+    medium = 0.45
+    boundary = percentile_for_calibrated_risk(medium)
+
+    on_boundary, _ = _frr_at_deployed_operating_point(np.asarray([boundary]), medium)
+    just_above, _ = _frr_at_deployed_operating_point(np.asarray([boundary + 1e-9]), medium)
+    just_below, _ = _frr_at_deployed_operating_point(np.asarray([boundary - 1e-9]), medium)
+
+    assert on_boundary.false_rejection_rate == pytest.approx(1.0)
+    assert just_above.false_rejection_rate == pytest.approx(0.0)
+    assert just_below.false_rejection_rate == pytest.approx(1.0)
+
+
+def test_the_operating_point_tracks_a_different_medium_threshold() -> None:
+    """The boundary is read from config, never hardcoded."""
+    import numpy as np
+
+    from tools.enrollment.activate import _frr_at_deployed_operating_point
+
+    percentiles = np.asarray([10.0, 30.0, 50.0, 70.0, 90.0], dtype=float)
+    strict, _ = _frr_at_deployed_operating_point(percentiles, 0.75)  # percentile <= 25
+    lenient, _ = _frr_at_deployed_operating_point(percentiles, 0.25)  # percentile <= 75
+    assert strict.false_rejection_rate == pytest.approx(1 / 5)
+    assert lenient.false_rejection_rate == pytest.approx(4 / 5)
+
+
+def test_refuses_activation_with_no_genuine_validation_scores(monkeypatch) -> None:
+    """No scorable VALIDATION window is a data problem, not a cohort problem."""
+    from tools.enrollment import activate as activate_module
+
+    monkeypatch.setattr(
+        activate_module, "zero_effort_cross_evaluation", lambda artifacts, windows: {}
+    )
+    with pytest.raises(ValueError, match="ENROLLMENT_VALIDATION_NO_GENUINE"):
+        activate_module._measure_validation_metrics(
+            "participant-01", {}, {}, medium_threshold=0.45
+        )
