@@ -80,6 +80,15 @@ artifacts/
 /models/
 .cache/
 
-PLAN.md
+
 START_IMPLEMENTATION.md
 TASK_DELEGATION.md
+status.md
+DATA_COLLECTION_GUIDE.md
+discussion.md
+
+data/collection/administration.json
+data/
+*.db
+*.sqlite
+*.sqlite3
