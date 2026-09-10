@@ -119,6 +119,16 @@ def test_config_is_strict_cross_validated_and_versioned(tmp_path: Path) -> None:
     assert len(settings.config_checksum) == 64
     assert settings.risk.medium_threshold < settings.risk.high_threshold
 
+    # The deployed pilot operating point (docs/threshold-pair-analysis-
+    # 2026-09-10.md, candidate pair #5), selected by human/team review after
+    # diagnosis.md showed 0.45/0.75 rejected ~55%/~19% of the enrolled
+    # user's own in-sample training windows. Asserted against the literal
+    # values, not just the ordering invariant, so a future edit to
+    # config/risk.development.yaml that silently reverts or drifts the
+    # operating point is caught here.
+    assert settings.risk.medium_threshold == pytest.approx(0.80)
+    assert settings.risk.high_threshold == pytest.approx(0.90)
+
     invalid = tmp_path / "risk.yaml"
     invalid.write_text(
         "config_version: bad\nprotocol_version: 1.0.0\ndevelopment_only: true\n"

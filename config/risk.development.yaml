@@ -1,7 +1,21 @@
 # T-013 synthetic/local development policy only. The numeric O3/O7/O8/O9
-# questions remain OPEN and require Phase 4/5 evidence plus human approval.
-# These values exercise code paths; they are not approved production policy.
-config_version: t013-synthetic-development-v1
+# questions remain OPEN and require Phase 4/5 evidence plus human approval:
+# any operating point recorded here is provisional pending empirical FAR/FRR
+# evaluation against real impostor/attacker data, which the single-participant
+# pilot corpus cannot yet provide (ADR-014).
+#
+# medium_threshold/high_threshold = 0.80/0.90 is the selected provisional
+# pilot operating point (2026-09-10), chosen from the human/team review of
+# the frozen-corpus pair sweep in
+# docs/threshold-pair-analysis-2026-09-10.md (candidate pair #5: percentile
+# mapping 20/10; TRAIN medium/high crossing 0.1380/0.0599, VALIDATION
+# 0.3753/0.1823, EVALUATION 0.2876/0.1056). It replaces the earlier
+# 0.45/0.75 pair, which diagnosis.md showed rejected the enrolled user's own
+# in-sample training windows at ~55%/~19% -- a floor imposed by the
+# threshold itself, not by this participant's behavior. This pair still has
+# no measured FAR (no impostor cohort exists yet) and is not a claim about
+# real-world accuracy.
+config_version: t013-synthetic-development-v2-pilot-op-0.80-0.90
 protocol_version: 1.0.0
 development_only: true
 
@@ -14,8 +28,8 @@ risk:
   keyboard_weight: 0.5
   mouse_weight: 0.5
   ewma_alpha: 0.4
-  medium_threshold: 0.45
-  high_threshold: 0.75
+  medium_threshold: 0.80
+  high_threshold: 0.90
   breach_k: 3
   breach_n: 5
   cooldown_seconds: 60

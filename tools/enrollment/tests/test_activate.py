@@ -459,14 +459,349 @@ def test_the_operating_point_tracks_a_different_medium_threshold() -> None:
     assert lenient.false_rejection_rate == pytest.approx(4 / 5)
 
 
-def test_refuses_activation_with_no_genuine_validation_scores(monkeypatch) -> None:
-    """No scorable VALIDATION window is a data problem, not a cohort problem."""
+def test_refuses_activation_with_no_genuine_validation_scores() -> None:
+    """No scorable VALIDATION window is a data problem, not a cohort problem.
+
+    The guard is on the fused per-window evidence, which is what the headline
+    rate is measured over -- an empty profile produces no fused score, so the
+    refusal fires before any per-modality pooling is attempted.
+    """
     from tools.enrollment import activate as activate_module
 
-    monkeypatch.setattr(
-        activate_module, "zero_effort_cross_evaluation", lambda artifacts, windows: {}
-    )
     with pytest.raises(ValueError, match="ENROLLMENT_VALIDATION_NO_GENUINE"):
         activate_module._measure_validation_metrics(
-            "participant-01", {}, {}, medium_threshold=0.45
+            "participant-01",
+            {},
+            {},
+            medium_threshold=0.45,
+            keyboard_weight=0.5,
+            mouse_weight=0.5,
         )
+
+
+# ---------------------------------------------------------------------------
+# Reporting unit: the headline FRR is measured in the engine's breach unit
+# ---------------------------------------------------------------------------
+
+
+class _StubScore:
+    """Minimal stand-in for ``ml.training.common.ScoreResult``."""
+
+    def __init__(self, percentile: float | None) -> None:
+        self.available = percentile is not None
+        self.percentile_score = percentile
+
+
+def _stub_scorer(monkeypatch, by_modality_and_window: dict[tuple[str, str], float | None]):
+    """Patch ``score_window`` so the fusion arithmetic can be asserted exactly."""
+
+    from tools.enrollment import activate as activate_module
+
+    def fake_score_window(artifact, window):
+        return _StubScore(by_modality_and_window.get((artifact, window)))
+
+    monkeypatch.setattr(activate_module, "score_window", fake_score_window)
+
+
+def test_fused_window_percentiles_yield_one_value_per_scorable_window(monkeypatch) -> None:
+    """One fused value per window -- not one per (window, modality) pair."""
+
+    from tools.enrollment.activate import _fused_window_percentiles
+
+    _stub_scorer(
+        monkeypatch,
+        {
+            ("kbd-artifact", "full-window"): 20.0,
+            ("mouse-artifact", "full-window"): 60.0,
+            ("kbd-artifact", "kbd-window"): 40.0,
+            ("mouse-artifact", "kbd-window"): None,
+            ("kbd-artifact", "mouse-window"): None,
+            ("mouse-artifact", "mouse-window"): 80.0,
+            ("kbd-artifact", "empty-window"): None,
+            ("mouse-artifact", "empty-window"): None,
+        },
+    )
+
+    fused = _fused_window_percentiles(
+        {"keyboard": "kbd-artifact", "mouse": "mouse-artifact"},
+        ["full-window", "kbd-window", "mouse-window", "empty-window"],
+        keyboard_weight=0.5,
+        mouse_weight=0.5,
+    )
+
+    # Three scorable windows, one fused value each. The window that scored in
+    # neither modality contributes nothing rather than a zero (ADR-005).
+    assert fused == pytest.approx([40.0, 40.0, 80.0])
+
+
+def test_fusion_is_availability_renormalised_and_uses_the_configured_weights(
+    monkeypatch,
+) -> None:
+    """A single-modality window must not be penalised for the missing one."""
+
+    from tools.enrollment.activate import _fused_window_percentiles
+
+    _stub_scorer(
+        monkeypatch,
+        {
+            ("kbd-artifact", "full-window"): 20.0,
+            ("mouse-artifact", "full-window"): 60.0,
+            ("kbd-artifact", "kbd-window"): 20.0,
+            ("mouse-artifact", "kbd-window"): None,
+        },
+    )
+
+    fused = _fused_window_percentiles(
+        {"keyboard": "kbd-artifact", "mouse": "mouse-artifact"},
+        ["full-window", "kbd-window"],
+        keyboard_weight=0.25,
+        mouse_weight=0.75,
+    )
+
+    # FULL honours the weights; KBD_ONLY renormalises to the keyboard score
+    # itself rather than diluting it toward zero.
+    assert fused[0] == pytest.approx(0.25 * 20.0 + 0.75 * 60.0)
+    assert fused[1] == pytest.approx(20.0)
+
+
+def test_a_single_modality_profile_still_fuses(monkeypatch) -> None:
+    """A profile where only one modality trained must still measure."""
+
+    from tools.enrollment.activate import _fused_window_percentiles
+
+    _stub_scorer(monkeypatch, {("mouse-artifact", "mouse-window"): 30.0})
+
+    fused = _fused_window_percentiles(
+        {"mouse": "mouse-artifact"},
+        ["mouse-window"],
+        keyboard_weight=0.5,
+        mouse_weight=0.5,
+    )
+    assert fused == pytest.approx([30.0])
+
+
+def test_headline_frr_is_the_fused_per_window_rate(single_participant_fixture) -> None:
+    """The reported FRR must equal the rate RiskEngine would actually breach at.
+
+    Recomputed independently here from the activated artifacts, so the test
+    fails if the headline silently reverts to the pooled per-(window,modality)
+    unit that diagnosis.md flagged (0.8195 pooled vs 0.8418 fused in the pilot).
+    """
+    import numpy as np
+
+    from backend.app.models.service import percentile_for_calibrated_risk
+    from ml.training.persistence import load_artifact
+    from tools.collection import corpus as corpus_module
+    from tools.enrollment.activate import _fused_window_percentiles, activate_first_profile
+
+    context = single_participant_fixture()
+    profile = activate_first_profile(**context)
+
+    artifacts = {}
+    if profile.keyboard_artifact_version:
+        artifacts["keyboard"] = load_artifact(
+            context["artifact_root"]
+            / "participant-01"
+            / f"{profile.keyboard_artifact_version}.joblib"
+        )
+    if profile.mouse_artifact_version:
+        artifacts["mouse"] = load_artifact(
+            context["artifact_root"] / "participant-01" / f"{profile.mouse_artifact_version}.joblib"
+        )
+
+    validation = corpus_module.load_frozen_corpus(
+        context["database"], context["manifest"], "VALIDATION"
+    )
+    risk = context["risk_settings"].risk
+    fused = _fused_window_percentiles(
+        artifacts,
+        validation.windows_by_user["participant-01"],
+        keyboard_weight=risk.keyboard_weight,
+        mouse_weight=risk.mouse_weight,
+    )
+    boundary = percentile_for_calibrated_risk(risk.medium_threshold)
+    expected = float(np.mean(np.asarray(fused) <= boundary))
+
+    assert profile.validation.candidate.false_rejection_rate == pytest.approx(expected)
+
+
+def test_the_operating_point_names_the_secondary_per_modality_rate(
+    single_participant_fixture,
+) -> None:
+    """The per-modality figure is kept, but labelled as secondary."""
+    from tools.enrollment.activate import activate_first_profile
+
+    profile = activate_first_profile(**single_participant_fixture())
+    operating_point = profile.validation.operating_point
+
+    assert "fused" in operating_point
+    assert "secondary per-(window,modality) frr@" in operating_point
+    assert "modality-scores" in operating_point
+
+
+def test_the_secondary_rate_is_measured_over_more_samples_than_the_headline(
+    single_participant_fixture,
+) -> None:
+    """The two units are structurally different, not a relabelling.
+
+    Every FULL window contributes two modality-scores but only one fused
+    window, so as long as the corpus contains a FULL window the secondary
+    sample count strictly exceeds the headline's.
+    """
+    import re
+
+    from tools.enrollment.activate import activate_first_profile
+
+    profile = activate_first_profile(**single_participant_fixture())
+    operating_point = profile.validation.operating_point
+
+    fused_match = re.search(r"over (\d+) windows", operating_point)
+    pooled_match = re.search(r"over (\d+) modality-scores", operating_point)
+    assert fused_match is not None and pooled_match is not None
+    assert int(pooled_match.group(1)) > int(fused_match.group(1))
+
+
+def test_the_secondary_rate_survives_into_model_profiles(single_participant_fixture) -> None:
+    """The audit string is persisted, not just printed."""
+    from backend.app.updates.repository import _profile_from_row
+    from tools.enrollment.activate import activate_first_profile
+
+    context = single_participant_fixture()
+    activate_first_profile(**context)
+    with SQLiteDatabase(context["database"], busy_timeout_ms=5000).connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM model_profiles WHERE user_id = ? AND status = 'ACTIVE'",
+            ("participant-01",),
+        ).fetchone()
+    stored = _profile_from_row(row)
+    assert "secondary per-(window,modality) frr@" in stored.validation.operating_point
+
+
+def test_the_cohort_path_also_reports_in_the_fused_unit(enrollment_fixture) -> None:
+    """Both measurement paths must report FRR in the same unit."""
+    from tools.enrollment.activate import activate_first_profile
+
+    profile = activate_first_profile(**enrollment_fixture())
+    assert profile.validation.code == "ENROLLMENT_INITIAL_PROFILE_NO_BASELINE"
+    assert "fused-per-window EER" in profile.validation.operating_point
+    assert "secondary per-(window,modality) frr@" in profile.validation.operating_point
+
+
+# ---------------------------------------------------------------------------
+# Provenance: activation registers its artifacts in the models table
+# ---------------------------------------------------------------------------
+
+
+def _models_rows(database: Path) -> list:
+    with SQLiteDatabase(database, busy_timeout_ms=5000).connection() as connection:
+        return connection.execute("SELECT * FROM models ORDER BY modality").fetchall()
+
+
+def test_activation_registers_every_artifact_in_the_models_table(
+    single_participant_fixture,
+) -> None:
+    """The models table is the database's record of what is actually deployed."""
+    from tools.enrollment.activate import activate_first_profile
+
+    context = single_participant_fixture()
+    profile = activate_first_profile(**context)
+
+    registered = {row["modality"]: row for row in _models_rows(context["database"])}
+    expected = {
+        name: version
+        for name, version in (
+            ("KEYBOARD", profile.keyboard_artifact_version),
+            ("MOUSE", profile.mouse_artifact_version),
+        )
+        if version is not None
+    }
+
+    assert expected, "the fixture must train at least one modality"
+    assert set(registered) == set(expected)
+    for modality, version in expected.items():
+        assert registered[modality]["artifact_version"] == version
+        assert registered[modality]["user_id"] == "participant-01"
+
+
+def test_registered_rows_carry_the_artifact_checksum_and_training_range(
+    single_participant_fixture,
+) -> None:
+    """An audit must be able to check the .joblib against the database."""
+    from ml.features.schema import FEATURE_SCHEMA_VERSION
+    from ml.training.persistence import load_artifact
+    from tools.enrollment.activate import activate_first_profile
+
+    context = single_participant_fixture()
+    profile = activate_first_profile(**context)
+    rows = {row["modality"]: row for row in _models_rows(context["database"])}
+
+    for modality, version in (
+        ("KEYBOARD", profile.keyboard_artifact_version),
+        ("MOUSE", profile.mouse_artifact_version),
+    ):
+        if version is None:
+            continue
+        artifact = load_artifact(context["artifact_root"] / "participant-01" / f"{version}.joblib")
+        row = rows[modality]
+        assert row["checksum"] == artifact.checksum
+        assert row["feature_schema_version"] == FEATURE_SCHEMA_VERSION
+        assert row["training_range_start"] == artifact.training_data_date_range[0]
+        assert row["training_range_end"] == artifact.training_data_date_range[1]
+
+
+def test_registered_rows_record_pilot_provenance(single_participant_fixture) -> None:
+    """Provenance comes from the training windows, never from a default."""
+    from tools.enrollment.activate import activate_first_profile
+
+    context = single_participant_fixture()
+    activate_first_profile(**context)
+
+    rows = _models_rows(context["database"])
+    assert rows
+    for row in rows:
+        payload = json.loads(row["artifact_json"])
+        assert payload["provenance"] == ["PILOT"]
+        # The calibration reference distribution travels with the record, so
+        # the checksum can be verified without opening the .joblib.
+        assert payload["calibration"]["reference_scores"]
+
+
+def test_a_failed_activation_registers_no_model(single_participant_fixture, monkeypatch) -> None:
+    """Registration happens with the artifact write, after validation passed."""
+    from tools.enrollment import activate as activate_module
+
+    context = single_participant_fixture()
+
+    def _no_genuine(*args, **kwargs):
+        raise ValueError("ENROLLMENT_VALIDATION_NO_GENUINE: forced for this test")
+
+    monkeypatch.setattr(activate_module, "_measure_validation_metrics", _no_genuine)
+    with pytest.raises(ValueError, match="ENROLLMENT_VALIDATION_NO_GENUINE"):
+        activate_module.activate_first_profile(**context)
+
+    assert _models_rows(context["database"]) == []
+
+
+def test_the_registry_record_refuses_a_non_deployable_modality() -> None:
+    """A 'combined' artifact is an ADR-006 baseline, never a deployed model."""
+    from ml.calibration.percentile import PercentileCalibrator
+    from ml.training.common import ModelArtifact, PreprocessingParams
+    from tools.enrollment.activate import _registry_record
+
+    artifact = ModelArtifact(
+        user_id="participant-01",
+        modality="combined",
+        model_type="isolation_forest",
+        feature_schema_version="1.0.0",
+        feature_names=["a"],
+        training_data_date_range=("2026-01-01", "2026-01-02"),
+        provenance_mix={"PILOT": 1},
+        hyperparameters={},
+        preprocessing=PreprocessingParams(mean=[0.0], scale=[1.0]),
+        calibration=PercentileCalibrator(reference_scores=[0.0]),
+        metrics_at_training={},
+        version="v1",
+        checksum="a" * 64,
+    )
+    with pytest.raises(ValueError, match="models table records deployed"):
+        _registry_record(artifact)
