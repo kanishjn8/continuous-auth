@@ -31,10 +31,64 @@ export interface PendingChallenge {
   readonly expires_at: string;
 }
 
+/**
+ * Where the backend says this session sits on the escalation ladder. The
+ * backend is the authority: these values change what the console renders,
+ * never whether the API will answer. `REAUTH_REQUIRED` and `LOCKED_OUT` are
+ * already being enforced server-side by the time the dashboard sees them.
+ */
+export type EnforcementPosture =
+  "NORMAL" | "SOFT_CHALLENGE" | "REAUTH_REQUIRED" | "LOCKED_OUT";
+
+export interface SessionEnforcement {
+  readonly enforcement_enabled: boolean;
+  readonly posture: EnforcementPosture;
+  readonly blocks_protected_access: boolean;
+  readonly locked_out: boolean;
+  readonly triggering_decision_id: string | null;
+  readonly since: string | null;
+  readonly failed_responses: number;
+}
+
 export interface EnforcementStatus {
   readonly enforcement_enabled: boolean;
   readonly configured: boolean;
+  readonly session: SessionEnforcement;
   readonly pending_challenge: PendingChallenge | null;
+}
+
+export type ChallengeOutcome = "ACCEPTED" | "REJECTED" | "EXPIRED";
+
+/**
+ * True when the console must be replaced by the verification screen rather
+ * than merely annotated. A soft challenge is non-blocking by design, so it
+ * gets a banner and an inline form; a reauthentication or a lockout takes
+ * over, because the backend is already refusing every protected route.
+ */
+export function blocksConsole(status: EnforcementStatus | null): boolean {
+  return status !== null && status.session.blocks_protected_access;
+}
+
+/**
+ * What the participant is told. Deliberately specific about lockout: a
+ * console that says "something went wrong" during a drill teaches the
+ * operator nothing and teaches the participant less.
+ */
+export function enforcementHeadline(posture: EnforcementPosture): string {
+  if (posture === "LOCKED_OUT") return "Session locked";
+  if (posture === "REAUTH_REQUIRED") return "Identity verification required";
+  if (posture === "SOFT_CHALLENGE") return "Quick identity check";
+  return "Protection active";
+}
+
+export function enforcementDetail(posture: EnforcementPosture): string {
+  if (posture === "LOCKED_OUT")
+    return "Access is blocked after a failed identity verification. Answer the security challenge to restore this session.";
+  if (posture === "REAUTH_REQUIRED")
+    return "Unusual interaction behaviour was detected. Answer the security challenge to continue.";
+  if (posture === "SOFT_CHALLENGE")
+    return "Please confirm it is still you. You can keep working while you answer.";
+  return "Continuous verification is running normally.";
 }
 
 /**
@@ -52,6 +106,7 @@ export type CollectionProvenance = {
 };
 
 const SCHEDULED_PREFIX = "scheduled-anchor:";
+const RECOVERY_PREFIX = "recovery:";
 
 /**
  * A scheduled A3 verification prompt arrives through the same challenge
@@ -61,6 +116,15 @@ const SCHEDULED_PREFIX = "scheduled-anchor:";
  */
 export function isScheduledVerification(decisionId: string): boolean {
   return decisionId.startsWith(SCHEDULED_PREFIX);
+}
+
+/**
+ * A reauthentication the participant asked for in order to clear an
+ * enforcement posture, rather than one the risk engine dispatched. Answering
+ * it correctly is what restores a blocked or locked-out session.
+ */
+export function isRecoveryChallenge(decisionId: string): boolean {
+  return decisionId.startsWith(RECOVERY_PREFIX);
 }
 
 export interface ChallengeSetupInput {

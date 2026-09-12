@@ -19,7 +19,7 @@ enforcement:
   # Master switch for real OS-level enforcement. False = decisions are still
   # computed, recorded, and streamed, but no native prompt or workstation lock
   # is executed.
-  enabled: false
+  enabled: true
 
   # Show the native always-on-top prompt for SOFT_CHALLENGE / REAUTH.
   native_prompt: true

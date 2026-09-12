@@ -1,8 +1,9 @@
 {
-  "config_version": "t017-local-development-v1",
+  "config_version": "t017-local-development-v2-enforcement-surface",
   "reconnect_initial_ms": 500,
   "reconnect_max_ms": 10000,
   "stale_after_ms": 15000,
   "timeline_limit": 120,
-  "replay_step_ms": 800
+  "replay_step_ms": 800,
+  "enforcement_poll_ms": 3000
 }

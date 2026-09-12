@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,10 +13,15 @@ from backend.app.decisions.adapters import EnforcementCoordinator
 from backend.app.decisions.challenge import (
     ChallengeError,
     ChallengeService,
+    PendingChallenge,
     ResponseOutcome,
     UnknownChallenge,
+    is_engine_decision,
+    is_recovery_challenge,
+    is_scheduled_challenge,
 )
 from backend.app.decisions.config import EnforcementSettings
+from backend.app.decisions.session import EnforcementSessionState
 from backend.app.storage.service import StorageService
 from backend.app.updates.manager import UpdateManager
 from backend.app.updates.repository import SQLiteUpdateRepository
@@ -56,6 +62,12 @@ class PageResult(Generic[T]):
 
 ActiveUserProvider = Callable[[], str | None]
 ShadowModeSetter = Callable[[bool], None]
+#: Opens (or returns) the reauthentication that clears an enforcement
+#: posture. Supplied by the runtime orchestrator, which is the only component
+#: that knows the live session and segment.
+ReauthOpener = Callable[[], PendingChallenge | None]
+#: Records the A2 anchor for a correctly answered recovery reauthentication.
+RecoveryAnchorSink = Callable[..., None]
 
 
 class SQLiteApiBackend:
@@ -70,6 +82,9 @@ class SQLiteApiBackend:
         enforcement: EnforcementCoordinator | None = None,
         enforcement_settings: EnforcementSettings | None = None,
         scheduled_anchor_sink: Callable[..., None] | None = None,
+        session_state: EnforcementSessionState | None = None,
+        reauth_opener: ReauthOpener | None = None,
+        recovery_anchor_sink: RecoveryAnchorSink | None = None,
     ) -> None:
         self.storage = storage
         self.active_user_provider = active_user_provider
@@ -79,6 +94,9 @@ class SQLiteApiBackend:
         self.enforcement = enforcement
         self.enforcement_settings = enforcement_settings
         self._scheduled_anchor_sink = scheduled_anchor_sink
+        self.session_state = session_state
+        self._reauth_opener = reauth_opener
+        self._recovery_anchor_sink = recovery_anchor_sink
         self.update_repository = SQLiteUpdateRepository(storage)
 
     def current_state(self) -> CurrentState:
@@ -333,15 +351,54 @@ class SQLiteApiBackend:
         response_token: str | None,
     ) -> str:
         service = self._challenge()
+        # Resolve anything already overdue before accepting an answer, so a
+        # late answer to a challenge that expired while the request was in
+        # flight cannot land ahead of the expiry that should have escalated
+        # it. `respond` re-checks the deadline itself; this is about the
+        # ordering of the enforcement transitions, not the verdict.
+        just_expired = self.sweep_expired_challenges()
         try:
             result = service.respond(decision_id, answer, response_token=response_token)
         except UnknownChallenge as exc:
+            # An answer that arrives after the sweep removed its challenge is
+            # late, not unknown; EXPIRED is the truthful outcome and the one
+            # the native prompt and the dashboard already know how to render.
+            # The token is still checked, so a caller guessing decision ids
+            # learns no more than it would from the 404 below.
+            for challenge in just_expired:
+                if challenge.decision_id != decision_id:
+                    continue
+                if response_token is not None and not hmac.compare_digest(
+                    challenge.response_token, response_token
+                ):
+                    break
+                return ResponseOutcome.EXPIRED.value
             raise ResourceNotFound(str(exc)) from exc
         except ChallengeError as exc:
             raise ResourceConflict(str(exc)) from exc
         accepted = result.outcome is ResponseOutcome.ACCEPTED
-        is_scheduled_anchor = result.challenge.decision_id.startswith("scheduled-anchor:")
-        if self.enforcement is not None and not is_scheduled_anchor:
+        is_scheduled_anchor = is_scheduled_challenge(result.challenge.decision_id)
+        if self.session_state is not None and not is_scheduled_anchor:
+            # A scheduled A3 prompt is routine verification, never a risk
+            # response: answering one wrongly must not escalate, and
+            # answering one correctly must not clear a real escalation.
+            self.session_state.observe_challenge_outcome(
+                decision_id=result.challenge.decision_id,
+                action=result.challenge.action,
+                outcome=result.outcome,
+            )
+        if (
+            accepted
+            and is_recovery_challenge(result.challenge.decision_id)
+            and self._recovery_anchor_sink is not None
+            and result.evidence_reference is not None
+        ):
+            self._recovery_anchor_sink(
+                session_id=result.challenge.session_id,
+                segment_id=result.challenge.segment_id,
+                evidence_reference=result.evidence_reference,
+            )
+        if self.enforcement is not None and is_engine_decision(result.challenge.decision_id):
             # A scheduled-anchor decision_id is minted in memory by
             # ChallengeService.open_scheduled and is never inserted into the
             # `decisions` table (it is not a RiskDecision), so routing it
@@ -351,7 +408,10 @@ class SQLiteApiBackend:
             # answered A3 prompt into a 500 with no anchor stored. A
             # scheduled prompt is always SOFT_CHALLENGE and never produces an
             # A2 anchor, so this call has nothing to do for that path anyway;
-            # the scheduled_anchor_sink below is what records A3.
+            # the scheduled_anchor_sink below is what records A3. A
+            # `recovery:` id is minted the same way and is excluded for the
+            # same reason; its A2 anchor comes from _recovery_anchor_sink
+            # above.
             self.enforcement.record_challenge_response(
                 decision_id=result.challenge.decision_id,
                 requested_action=result.challenge.action,
@@ -379,15 +439,93 @@ class SQLiteApiBackend:
             )
         return result.outcome.value
 
+    def sweep_expired_challenges(self) -> tuple[PendingChallenge, ...]:
+        """Resolve overdue challenges and escalate the ones that matter.
+
+        Driven by request traffic rather than a timer: the gate dependency
+        and the status endpoint both call it, so an expiry is resolved by the
+        next thing the participant does. A challenge nobody ever comes back
+        for stays unresolved until someone touches the API, which is exactly
+        when the answer starts to matter again.
+
+        Scheduled A3 prompts expire silently. A participant who ignores a
+        routine verification has not failed a security control.
+        """
+
+        if self.challenge_service is None:
+            return ()
+        expired = self.challenge_service.expire_overdue()
+        for challenge in expired:
+            if is_scheduled_challenge(challenge.decision_id):
+                continue
+            if self.session_state is not None:
+                self.session_state.observe_challenge_outcome(
+                    decision_id=challenge.decision_id,
+                    action=challenge.action,
+                    outcome=ResponseOutcome.EXPIRED,
+                )
+            if self.enforcement is not None and is_engine_decision(challenge.decision_id):
+                self.enforcement.record_challenge_response(
+                    decision_id=challenge.decision_id,
+                    requested_action=challenge.action,
+                    user_id=challenge.user_id,
+                    session_id=challenge.session_id,
+                    segment_id=challenge.segment_id,
+                    accepted=False,
+                    code=f"CHALLENGE_{ResponseOutcome.EXPIRED.value}",
+                )
+        return expired
+
+    def open_reauthentication(self) -> dict[str, object]:
+        """Issue the challenge that lets the participant clear enforcement.
+
+        Available only while the posture actually blocks access. Outside that
+        window there is nothing to clear, and minting a reauthentication on
+        demand would create an A2 anchor -- promotion-gate evidence (PLAN.md
+        12.2 G2) -- for any session that asked for one.
+        """
+
+        self._challenge()
+        if self.session_state is None or not self.session_state.blocks_protected_access():
+            raise ResourceConflict("no reauthentication is required")
+        if self._reauth_opener is None:
+            raise ResourceConflict("reauthentication is unavailable in this run mode")
+        try:
+            pending = self._reauth_opener()
+        except ChallengeError as exc:
+            raise ResourceConflict(str(exc)) from exc
+        if pending is None:
+            raise ResourceConflict("no live session is available to reauthenticate")
+        return {
+            "decision_id": pending.decision_id,
+            "question": pending.question,
+            "expires_at": pending.expires_at.isoformat().replace("+00:00", "Z"),
+        }
+
     def enforcement_status(self) -> dict[str, object]:
         """Observability only: what is outstanding, never the answer."""
 
         service = self._challenge()
+        self.sweep_expired_challenges()
         pending = service.active_challenge()
+        posture = (
+            self.session_state.snapshot()
+            if self.session_state is not None
+            else {
+                "enforcement_enabled": False,
+                "posture": "NORMAL",
+                "blocks_protected_access": False,
+                "locked_out": False,
+                "triggering_decision_id": None,
+                "since": None,
+                "failed_responses": 0,
+            }
+        )
         return {
             "enforcement_enabled": self.enforcement_settings is not None
             and self.enforcement_settings.enabled,
             "configured": service.is_configured(),
+            "session": posture,
             "pending_challenge": (
                 None
                 if pending is None

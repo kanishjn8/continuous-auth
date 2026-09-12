@@ -14,6 +14,7 @@ from .api.config import load_api_settings
 from .api.routes import create_api_app
 from .decisions.challenge import ChallengeService
 from .decisions.config import load_enforcement_settings
+from .decisions.session import EnforcementSessionState
 from .storage.config import load_storage_settings
 from .storage.service import StorageService
 from .updates.manager import UpdateManager
@@ -59,6 +60,10 @@ def create_runtime_app(
         shadow_mode_setter=shadow_mode_setter,
         challenge_service=ChallengeService(storage, enforcement_settings),
         enforcement_settings=enforcement_settings,
+        # No risk engine runs in this control-plane-only mode, so nothing can
+        # raise the posture; it exists so the enforcement surface has the
+        # same shape here as in the integrated runtime.
+        session_state=EnforcementSessionState(enabled=enforcement_settings.enabled),
     )
     return create_api_app(
         settings=load_api_settings(api_config),

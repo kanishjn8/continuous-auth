@@ -14,13 +14,14 @@ import type {
   CollectionProvenance,
   EnforcementStatus,
 } from "./challenge";
-import { isScheduledVerification } from "./challenge";
+import { blocksConsole, isScheduledVerification } from "./challenge";
 import { ProtectionBanner } from "./components/ProtectionBanner";
 import { dashboardConfig } from "./config";
 import { useDashboard } from "./hooks/useDashboard";
 import type { RiskDecision, WebSocketEnvelope } from "./protocol";
 import type { DashboardAction } from "./state/dashboard";
 import { AlertsView } from "./views/AlertsView";
+import { ChallengeResponseView } from "./views/ChallengeResponseView";
 import { ChallengeSetupView } from "./views/ChallengeSetupView";
 import { HealthView } from "./views/HealthView";
 import { HistoryView } from "./views/HistoryView";
@@ -159,36 +160,76 @@ export function App() {
   );
   const stopReplay = useRef<(() => void) | null>(null);
   const onUnauthorized = useCallback(() => setAuthenticated(false), []);
+  // Threaded into useDashboard rather than only into the render, so that
+  // clearing the posture tears the hook's effect down and back up: the
+  // stream reconnects and protected state is re-read the moment the backend
+  // starts answering again. Without this, a recovered session would show a
+  // permanently disconnected console until the page was reloaded.
+  const blocked = blocksConsole(enforcement);
   const { state, dispatch } = useDashboard(
-    authenticated && !replay,
+    authenticated && !replay && !blocked,
     onUnauthorized,
   );
 
   const refreshChallenge = useCallback(async () => {
     try {
-      const [status, enforcementStatus, provenanceStatus] = await Promise.all([
+      // Both of these stay reachable while enforcement is blocking -- they
+      // are how a blocked session learns what it must do. Everything else is
+      // fetched separately below, because the backend refuses protected
+      // routes once the posture blocks and a combined Promise.all would then
+      // throw away the enforcement status too.
+      const [status, enforcementStatus] = await Promise.all([
         loadChallengeStatus(),
         loadEnforcementStatus(),
-        loadCollectionProvenance(),
       ]);
       setChallenge(status);
       setEnforcement(enforcementStatus);
-      setProvenance(provenanceStatus);
     } catch {
       // A challenge surface that cannot be read must not blank the console;
       // the setup gate below stays closed until a status actually arrives.
       setChallenge(null);
+      return;
+    }
+    try {
+      setProvenance(await loadCollectionProvenance());
+    } catch {
+      // A protected read; expected to fail while enforcement blocks.
     }
   }, []);
 
   useEffect(() => {
-    if (authenticated) void refreshChallenge();
+    if (!authenticated) return;
+    void refreshChallenge();
+    // Enforcement state is owned by the backend and changes without any
+    // action from this console -- the risk engine escalates on its own, and
+    // a challenge can expire while nobody is looking. Polling is what makes
+    // a dispatched challenge appear at all; the WebSocket carries risk and
+    // alert events, not the enforcement posture, and is itself closed once
+    // the posture blocks.
+    const timer = window.setInterval(
+      () => void refreshChallenge(),
+      dashboardConfig.enforcement_poll_ms,
+    );
+    return () => window.clearInterval(timer);
   }, [authenticated, refreshChallenge]);
 
   if (!authenticated)
     return <LoginView onAuthenticated={() => setAuthenticated(true)} />;
   if (challenge !== null && !challenge.configured && !replay)
     return <ChallengeSetupView onConfigured={() => void refreshChallenge()} />;
+  // A blocking posture replaces the console rather than decorating it. This
+  // is presentation only: the backend is already refusing every protected
+  // route and has closed the live stream, so nothing here is what keeps the
+  // session blocked, and dismissing it would reveal nothing.
+  if (!replay && blocked && enforcement !== null)
+    return (
+      <main className="login-shell">
+        <ChallengeResponseView
+          enforcement={enforcement}
+          onResolved={() => void refreshChallenge()}
+        />
+      </main>
+    );
   async function signOut() {
     try {
       await logout();
@@ -253,22 +294,36 @@ export function App() {
       </header>
       <ProtectionBanner state={state} />
       {enforcement?.pending_challenge ? (
-        isScheduledVerification(enforcement.pending_challenge.decision_id) ? (
+        <>
           <p
-            className="challenge-notice challenge-notice--scheduled"
+            className={
+              isScheduledVerification(enforcement.pending_challenge.decision_id)
+                ? "challenge-notice challenge-notice--scheduled"
+                : "challenge-notice"
+            }
             role="status"
           >
-            <strong>Routine verification</strong> · A periodic check that
-            confirms it is you. Nothing is wrong.
+            {isScheduledVerification(
+              enforcement.pending_challenge.decision_id,
+            ) ? (
+              <>
+                <strong>Routine verification</strong> · A periodic check that
+                confirms it is you. Nothing is wrong.
+              </>
+            ) : (
+              <>
+                Identity verification in progress ·{" "}
+                {enforcement.pending_challenge.action} · answer it here, or on
+                the native prompt on this desktop. Both reach the same backend
+                check.
+              </>
+            )}
           </p>
-        ) : (
-          <p className="challenge-notice" role="status">
-            Identity verification in progress ·{" "}
-            {enforcement.pending_challenge.action} · answer the prompt on this
-            desktop. This console only reports it; the prompt is the enforcement
-            path.
-          </p>
-        )
+          <ChallengeResponseView
+            enforcement={enforcement}
+            onResolved={() => void refreshChallenge()}
+          />
+        </>
       ) : null}
       <div className="workspace">
         <nav aria-label="Dashboard views">

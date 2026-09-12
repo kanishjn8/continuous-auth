@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from protocol.generated.python.contracts import (
     DecisionAction,
@@ -16,6 +16,9 @@ from protocol.generated.python.contracts import (
     UserState,
     VerificationAnchor,
 )
+
+if TYPE_CHECKING:
+    from .session import EnforcementSessionState
 
 
 def _utc_now() -> datetime:
@@ -137,12 +140,33 @@ class EnforcementCoordinator:
         store: EnforcementStore | None = None,
         notice_sink: NoticeSink | None = None,
         anchor_id_factory: IdFactory | None = None,
+        session_state: EnforcementSessionState | None = None,
     ) -> None:
         self._adapters = dict(adapters)
         self._adapters.setdefault(DecisionAction.CONTINUE, ContinueAdapter())
         self._store = store
         self._notice_sink = notice_sink
         self._anchor_id_factory = anchor_id_factory or _new_anchor_id
+        # The backend-authoritative half of the ladder. Optional so every
+        # existing construction site (and every test that builds a bare
+        # coordinator) keeps working unchanged.
+        self._session_state = session_state
+
+    @property
+    def session_state(self) -> EnforcementSessionState | None:
+        return self._session_state
+
+    def attach_session_state(self, state: EnforcementSessionState) -> None:
+        """Adopt the runtime's posture when the coordinator was built elsewhere.
+
+        A caller that supplies its own coordinator (tests, and any future
+        alternative wiring) must not end up with a posture nothing writes to:
+        the API would then gate on a state that never moves, which fails
+        open silently and invisibly. Attaching here keeps exactly one posture
+        per runtime regardless of who constructed the coordinator.
+        """
+
+        self._session_state = state
 
     def _record(self, outcome: ActionOutcome) -> ActionOutcome:
         if self._store is not None:
@@ -187,6 +211,16 @@ class EnforcementCoordinator:
                     now,
                     None,
                 )
+            )
+        # Raised before the adapter runs, so an adapter that fails open, is
+        # missing, or is simply unavailable on this platform still leaves the
+        # backend knowing that enforcement was required. The OS action fails
+        # open (ADR-011); the posture does not silently vanish with it.
+        if self._session_state is not None:
+            self._session_state.observe_decision(
+                decision_id=decision.decision_id,
+                action=decision.action,
+                enforcement_applied=decision.enforcement_applied,
             )
         adapter = self._adapters.get(decision.action)
         if adapter is None:
@@ -242,6 +276,41 @@ class EnforcementCoordinator:
             segment_id=segment_id,
             anchor_type=VerificationAnchor.A3_SCHEDULED_PROMPT,
             evidence_reference=_evidence_digest(result.evidence_reference),
+            authenticated_at=authenticated_at or _utc_now(),
+        )
+        if self._store is not None:
+            self._store.record_verification(verification)
+        return verification
+
+    def record_recovery_reauthentication(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        segment_id: str | None,
+        evidence_reference: str,
+        authenticated_at: datetime | None = None,
+    ) -> VerificationRecord:
+        """Create the A2 anchor for a participant-initiated reauthentication.
+
+        Deliberately parallel to :meth:`record_scheduled_verification` rather
+        than routed through :meth:`record_challenge_response`. A recovery
+        challenge is minted in memory and has no row in the ``decisions``
+        table, so the ``UPDATE ... WHERE decision_id = ?`` inside
+        ``record_action_outcome`` would match nothing and raise -- turning a
+        correct answer into a 500 and leaving the session locked out. The
+        evidence is identical in kind to a system-triggered reauth (PLAN.md
+        12.2 A2: "Successful explicit reauthentication during the segment"),
+        so the anchor it produces is the same.
+        """
+
+        verification = VerificationRecord(
+            anchor_id=self._anchor_id_factory(),
+            user_id=user_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            anchor_type=VerificationAnchor.A2_REAUTH,
+            evidence_reference=_evidence_digest(evidence_reference),
             authenticated_at=authenticated_at or _utc_now(),
         )
         if self._store is not None:

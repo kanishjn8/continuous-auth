@@ -17,6 +17,8 @@ from backend.app.decisions.adapters import (
     VerificationRecord,
 )
 from backend.app.decisions.challenge import ChallengeError, ChallengeService, PendingChallenge
+from backend.app.decisions.config import EnforcementSettings
+from backend.app.decisions.session import EnforcementSessionState, PostureTransition
 from backend.app.ingestion.config import IngestionSettings
 from backend.app.ingestion.pipeline import IngestionPipeline
 from backend.app.ingestion.types import (
@@ -90,6 +92,7 @@ class RuntimeOrchestrator:
         update_manager: UpdateManager | None = None,
         anchor_scheduler: ScheduledAnchorScheduler | None = None,
         challenge_service: ChallengeService | None = None,
+        enforcement_settings: EnforcementSettings | None = None,
         drill_label: str | None = None,
     ) -> None:
         if provenance not in {DataProvenance.SYNTHETIC, DataProvenance.TEAM, DataProvenance.PILOT}:
@@ -106,11 +109,24 @@ class RuntimeOrchestrator:
         self.profile_provider = profile_provider
         self.heartbeat_timeout_seconds = heartbeat_timeout_seconds
         self.measurements = RuntimeMeasurements(measurement_capacity)
+        # The backend-authoritative half of the escalation ladder (PLAN.md
+        # 5.2: the dashboard must not be the only enforcement path). Gated by
+        # the same `enabled` flag as the OS-level adapters, so ordinary
+        # collection and calibration are untouched by it.
+        self.session_state = EnforcementSessionState(
+            enabled=enforcement_settings is not None and enforcement_settings.enabled,
+            transition_sink=self._on_posture_transition,
+        )
         self.enforcement = enforcement or EnforcementCoordinator(
             dict(enforcement_adapters or {}),
             store=storage,
             notice_sink=self._on_enforcement_notice,
+            session_state=self.session_state,
         )
+        # An injected coordinator is attached rather than left alone: one
+        # posture per runtime, whoever built the coordinator. A posture that
+        # nothing writes to would make the API gate fail open silently.
+        self.enforcement.attach_session_state(self.session_state)
         self.update_manager = update_manager
         self.anchor_scheduler = anchor_scheduler
         self.challenge_service = challenge_service
@@ -605,6 +621,56 @@ class RuntimeOrchestrator:
         if verification is not None and self.anchor_scheduler is not None:
             self.anchor_scheduler.anchor_recorded(session_id=session_id, at=instant)
 
+    def open_reauthentication(self) -> PendingChallenge | None:
+        """Open the challenge that lets the participant clear enforcement.
+
+        The C7 layer knows a reauthentication is required but not which
+        session or segment it belongs to; that lives here. Returns ``None``
+        when there is no live session to anchor one to, which the API
+        reports rather than fabricating a session.
+        """
+
+        if self.challenge_service is None:
+            return None
+        if self._active_user is None or self._session_id is None:
+            return None
+        segment_id = next(iter(self._builders), None)
+        if segment_id is None:
+            return None
+        return self.challenge_service.open_reauthentication(
+            user_id=self._active_user,
+            session_id=self._session_id,
+            segment_id=segment_id,
+        )
+
+    def complete_reauthentication(
+        self,
+        *,
+        session_id: str,
+        segment_id: str | None,
+        evidence_reference: str,
+        at: datetime | None = None,
+    ) -> None:
+        """Record the A2 anchor for a correctly answered recovery challenge.
+
+        Unlike the automatic A1 login anchor, this is not suppressed during a
+        drill. A1 is suppressed because the person at the keyboard never
+        authenticated; here someone demonstrably produced the participant's
+        own security answer, so recording it is simply true. Drill sessions
+        are excluded from every corpus loader regardless, so the anchor
+        cannot promote attacker windows into training data.
+        """
+
+        if self._active_user is None:
+            return
+        self.enforcement.record_recovery_reauthentication(
+            user_id=self._active_user,
+            session_id=session_id,
+            segment_id=segment_id,
+            evidence_reference=evidence_reference,
+            authenticated_at=at or datetime.now(UTC),
+        )
+
     def _progress_enrollment_and_calibration(self, *, after_score: bool) -> None:
         """Advance ENROLLING -> CALIBRATING -> ACTIVE from observed evidence.
 
@@ -763,6 +829,27 @@ class RuntimeOrchestrator:
             severity="HIGH",
             code=event.code,
             occurred_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            acknowledged=False,
+        )
+        self.storage.store_alert(alert)
+        self._emissions.append(StreamEmission(StreamEventType.ALERT, alert))
+
+    def _on_posture_transition(self, transition: PostureTransition) -> None:
+        """Make every enforcement-state change an auditable, streamed event.
+
+        The drill reads escalation from `alerts` and the audit chain
+        (docs/pilot/attack-drill-protocol.md step 8), so a lockout that only
+        existed in process memory would be invisible to the very measurement
+        the drill exists to produce. BEHAVIORAL, because these transitions
+        are consequences of behavioral risk, not of component availability.
+        """
+
+        alert = Alert(
+            alert_id=f"alert-{uuid.uuid4()}",
+            alert_type=AlertType.BEHAVIORAL,
+            severity="HIGH" if transition.current.value != "NORMAL" else "LOW",
+            code=transition.code,
+            occurred_at=transition.occurred_at.isoformat().replace("+00:00", "Z"),
             acknowledged=False,
         )
         self.storage.store_alert(alert)

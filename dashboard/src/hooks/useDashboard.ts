@@ -61,6 +61,16 @@ export function useDashboard(
           onUnauthorized();
           return;
         }
+        if (event.code === 4403) {
+          // The backend closed the stream because enforcement is blocking.
+          // Reconnecting would be refused the same way, and retrying in a
+          // loop would bury the verification screen under stream errors.
+          dispatch({
+            type: "OFFLINE",
+            error: "Live monitoring is paused until identity is verified.",
+          });
+          return;
+        }
         dispatch({
           type: "OFFLINE",
           error: "Live monitoring is disconnected.",

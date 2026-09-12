@@ -123,6 +123,7 @@ def create_collection_application(
         update_manager=update_manager,
         anchor_scheduler=anchor_scheduler,
         challenge_service=challenge_service,
+        enforcement_settings=enforcement_settings,
         drill_label=drill_label,
     )
     backend = SQLiteApiBackend(
@@ -134,6 +135,11 @@ def create_collection_application(
         enforcement=orchestrator.enforcement,
         enforcement_settings=enforcement_settings,
         scheduled_anchor_sink=orchestrator.complete_scheduled_anchor,
+        # One posture object, shared by the ingestion thread that raises it
+        # and the API that enforces it. Two would drift apart within a window.
+        session_state=orchestrator.session_state,
+        reauth_opener=orchestrator.open_reauthentication,
+        recovery_anchor_sink=orchestrator.complete_reauthentication,
     )
     app = create_api_app(
         settings=api_settings,

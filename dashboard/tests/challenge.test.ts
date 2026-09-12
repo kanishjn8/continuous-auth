@@ -5,12 +5,20 @@ import test from "node:test";
 
 import {
   ANSWER_INPUT_TYPE,
+  blocksConsole,
+  enforcementDetail,
+  enforcementHeadline,
+  isRecoveryChallenge,
   isScheduledVerification,
   MIN_ANSWER_LENGTH,
   MIN_QUESTION_LENGTH,
   validateChallengeSetup,
 } from "../src/challenge.ts";
-import type { CollectionProvenance } from "../src/challenge.ts";
+import type {
+  CollectionProvenance,
+  EnforcementPosture,
+  EnforcementStatus,
+} from "../src/challenge.ts";
 
 const QUESTION = "What was the name of your first pet?";
 const ANSWER = "wellington-the-third";
@@ -143,4 +151,89 @@ test("a scheduled anchor prompt is recognised by its decision id", () => {
 
 test("an enforcement challenge is not mistaken for a scheduled prompt", () => {
   assert.equal(isScheduledVerification("decision-9f2c"), false);
+});
+
+// -- enforcement posture ----------------------------------------------------
+//
+// The backend is the authority on all of this; these helpers only decide what
+// the console renders. They are tested here for the same reason the setup
+// rules are: so the two sides cannot drift apart on what a posture means.
+
+function status(
+  posture: EnforcementPosture,
+  pending: EnforcementStatus["pending_challenge"] = null,
+): EnforcementStatus {
+  return {
+    enforcement_enabled: true,
+    configured: true,
+    session: {
+      enforcement_enabled: true,
+      posture,
+      blocks_protected_access:
+        posture === "REAUTH_REQUIRED" || posture === "LOCKED_OUT",
+      locked_out: posture === "LOCKED_OUT",
+      triggering_decision_id: "decision-1",
+      since: "2026-01-01T00:00:00Z",
+      failed_responses: 0,
+    },
+    pending_challenge: pending,
+  };
+}
+
+test("a normal session is not interrupted", () => {
+  assert.equal(blocksConsole(status("NORMAL")), false);
+});
+
+test("a soft challenge does not take over the console", () => {
+  // MEDIUM is deliberately non-blocking; the participant keeps working.
+  assert.equal(blocksConsole(status("SOFT_CHALLENGE")), false);
+});
+
+test("a required reauthentication takes over the console", () => {
+  assert.equal(blocksConsole(status("REAUTH_REQUIRED")), true);
+});
+
+test("a lockout takes over the console", () => {
+  assert.equal(blocksConsole(status("LOCKED_OUT")), true);
+});
+
+test("an unread enforcement status never claims the session is blocked", () => {
+  // Failing closed here would lock the operator out of their own console
+  // whenever the status endpoint hiccups.
+  assert.equal(blocksConsole(null), false);
+});
+
+test("each posture is described to the participant in its own terms", () => {
+  assert.equal(enforcementHeadline("LOCKED_OUT"), "Session locked");
+  assert.equal(
+    enforcementHeadline("REAUTH_REQUIRED"),
+    "Identity verification required",
+  );
+  assert.notEqual(
+    enforcementDetail("LOCKED_OUT"),
+    enforcementDetail("REAUTH_REQUIRED"),
+  );
+});
+
+test("a recovery reauthentication is recognised by its decision id", () => {
+  assert.equal(isRecoveryChallenge("recovery:abc123"), true);
+  assert.equal(isRecoveryChallenge("decision-abc123"), false);
+  assert.equal(isScheduledVerification("recovery:abc123"), false);
+});
+
+test("the challenge response form never puts an answer in a URL", () => {
+  // Mirrors the existing guard on the setup form. An answer in a path or a
+  // query string reaches server and proxy logs.
+  const text = source("views/ChallengeResponseView.tsx");
+  assert.ok(!/[?&]answer=/.test(text));
+  assert.ok(text.includes("ANSWER_INPUT_TYPE"));
+});
+
+test("the client posts a challenge answer in the request body only", () => {
+  const text = source("api/client.ts");
+  const call = text.slice(
+    text.indexOf("export async function respondToChallenge"),
+  );
+  assert.ok(call.includes("JSON.stringify({ answer })"));
+  assert.ok(!/encodeURIComponent\(answer\)/.test(call));
 });

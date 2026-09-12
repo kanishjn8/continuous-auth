@@ -41,7 +41,36 @@ _MIN_ANSWER_LENGTH = 4
 
 CHALLENGE_ACTIONS = frozenset({DecisionAction.SOFT_CHALLENGE, DecisionAction.REAUTH})
 
+#: A scheduled A3 verification prompt (PLAN.md 12.2). Routine, never a risk
+#: response, and never an escalation trigger.
+SCHEDULED_PREFIX = "scheduled-anchor:"
+
+#: A reauthentication the participant asked for in order to clear an
+#: outstanding enforcement posture. Like a scheduled prompt it is minted in
+#: memory rather than by the risk engine, so it has no row in the `decisions`
+#: table; unlike one, it is a REAUTH and does resolve enforcement.
+RECOVERY_PREFIX = "recovery:"
+
 Clock = Callable[[], datetime]
+
+
+def is_scheduled_challenge(decision_id: str) -> bool:
+    return decision_id.startswith(SCHEDULED_PREFIX)
+
+
+def is_recovery_challenge(decision_id: str) -> bool:
+    return decision_id.startswith(RECOVERY_PREFIX)
+
+
+def is_engine_decision(decision_id: str) -> bool:
+    """True only for a challenge whose id came from a stored ``RiskDecision``.
+
+    The two in-memory prefixes above have no row in ``risk_events`` or
+    ``decisions``, so routing them through ``record_action_outcome`` would
+    raise on an UPDATE that matches nothing.
+    """
+
+    return not (is_scheduled_challenge(decision_id) or is_recovery_challenge(decision_id))
 
 
 def _utc_now() -> datetime:
@@ -296,7 +325,7 @@ class ChallengeService:
             raise ChallengeNotConfigured("no security challenge has been configured")
         now = self._clock()
         pending = PendingChallenge(
-            decision_id=f"scheduled-anchor:{secrets.token_urlsafe(16)}",
+            decision_id=f"{SCHEDULED_PREFIX}{secrets.token_urlsafe(16)}",
             user_id=user_id,
             session_id=session_id,
             segment_id=segment_id,
@@ -310,18 +339,94 @@ class ChallengeService:
             self._pending[pending.decision_id] = pending
         return pending
 
+    def open_reauthentication(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        segment_id: str,
+    ) -> PendingChallenge:
+        """Open (or return) the challenge that clears an enforcement posture.
+
+        The participant needs a way back in even when the dispatched
+        challenge is gone -- consumed by a wrong answer, or expired. This
+        mints a ``REAUTH`` so that answering it correctly is a genuine
+        explicit reauthentication in the PLAN.md 12.2 A2 sense, not a
+        weaker acknowledgement.
+
+        An unexpired enforcement challenge already outstanding is returned
+        unchanged rather than superseded. Minting a fresh one per request
+        would let anyone at the keyboard cycle challenges to reset the
+        timeout, and would leave a growing pile of unresolved entries that
+        the expiry sweep would then escalate on.
+        """
+
+        credential = self._credential_or_none()
+        if credential is None:
+            raise ChallengeNotConfigured("no security challenge has been configured")
+        now = self._clock()
+        with self._lock:
+            existing = [
+                item
+                for item in self._pending.values()
+                if item.expires_at > now and not is_scheduled_challenge(item.decision_id)
+            ]
+            if existing:
+                return max(existing, key=lambda item: item.opened_at)
+            pending = PendingChallenge(
+                decision_id=f"{RECOVERY_PREFIX}{secrets.token_urlsafe(16)}",
+                user_id=user_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                action=DecisionAction.REAUTH,
+                question=credential.question,
+                opened_at=now,
+                expires_at=now + timedelta(seconds=self._settings.challenge_timeout_seconds),
+                response_token=secrets.token_urlsafe(32),
+            )
+            self._pending[pending.decision_id] = pending
+        return pending
+
+    def expire_overdue(self, *, now: datetime | None = None) -> tuple[PendingChallenge, ...]:
+        """Remove and return every challenge whose deadline has passed.
+
+        ``config/enforcement.development.yaml`` states that an unanswered
+        challenge expiring "is recorded as a failed response, which is what
+        the escalation ladder (PLAN.md 11.3) treats as a failed
+        reauthentication". Filtering expired entries out of :meth:`pending`
+        was not that -- it discarded them silently, so walking away from a
+        forced reauthentication was indistinguishable from never having been
+        challenged. This makes expiry an event the caller can act on.
+        """
+
+        instant = now or self._clock()
+        with self._lock:
+            overdue = tuple(item for item in self._pending.values() if item.expires_at <= instant)
+            for item in overdue:
+                self._pending.pop(item.decision_id, None)
+        return overdue
+
     def pending(self) -> tuple[PendingChallenge, ...]:
         now = self._clock()
         with self._lock:
             return tuple(item for item in self._pending.values() if item.expires_at > now)
 
     def active_challenge(self) -> PendingChallenge | None:
-        """The most recent unexpired challenge, for dashboard observability."""
+        """The unexpired challenge the participant must deal with first.
+
+        An enforcement challenge outranks a scheduled A3 prompt regardless of
+        age: the participant is blocked until the former is answered, and
+        surfacing a routine prompt over it would hide the thing that actually
+        matters. Within a rank, the most recent wins.
+        """
 
         outstanding = self.pending()
         if not outstanding:
             return None
-        return max(outstanding, key=lambda item: item.opened_at)
+        return max(
+            outstanding,
+            key=lambda item: (not is_scheduled_challenge(item.decision_id), item.opened_at),
+        )
 
     # -- response ------------------------------------------------------
 

@@ -55,6 +55,16 @@ as the first:
       work was **not** repeatedly reaching MEDIUM. If it was, the operating point is
       wrong and a drill against it would prove nothing.
 - [ ] `config/enforcement.development.yaml` has `enabled: true`.
+- [ ] **The security challenge is configured**, and the legitimate user knows the
+      answer. Without it the escalation ladder has nothing to challenge with: a
+      `SOFT_CHALLENGE` or `REAUTH` is skipped as `CHALLENGE_NOT_CONFIGURED`, and a
+      lockout cannot be cleared from the console at all, because the credential
+      cannot be set while enforcement is blocking. The dashboard forces first-run
+      setup, so confirm it by signing in once and checking Settings.
+- [ ] The console has been opened once with enforcement on and shows
+      `Protection active` — i.e. `GET /v1/enforcement/status` reports posture
+      `NORMAL`. A session that is already blocked before the attacker sits down
+      measures nothing.
 
 ## 4. Practicalities before the attacker sits down
 
@@ -62,6 +72,8 @@ as the first:
       and that they can stop at any time.
 - [ ] The legitimate user's credentials are to hand, because a successful drill may
       end in a locked workstation.
+- [ ] The security answer is to hand as well. It is what clears a `REAUTH_REQUIRED`
+      or `LOCKED_OUT` console, through the verification screen or the native prompt.
 - [ ] The drill label for this run is chosen and unique (`drill-01`, `drill-02`, …).
 - [ ] The wall-clock takeover moment will be noted.
 

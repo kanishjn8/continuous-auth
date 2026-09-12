@@ -1,4 +1,5 @@
 import type {
+  ChallengeOutcome,
   ChallengeStatus,
   CollectionProvenance,
   EnforcementStatus,
@@ -100,6 +101,39 @@ export async function loadEnforcementStatus(): Promise<EnforcementStatus> {
 
 export async function loadCollectionProvenance(): Promise<CollectionProvenance> {
   return request<CollectionProvenance>("/v1/collection/provenance");
+}
+
+/**
+ * Answer a dispatched challenge.
+ *
+ * The answer is a credential: it travels in the request body, never in the
+ * URL, and the response carries only an outcome. The backend decides what
+ * that outcome means for the session -- this call never changes enforcement
+ * state on its own, and the caller must re-read the enforcement status
+ * rather than assume success unblocked anything.
+ */
+export async function respondToChallenge(
+  decisionId: string,
+  answer: string,
+): Promise<ChallengeOutcome> {
+  const body = await request<{ readonly outcome: ChallengeOutcome }>(
+    `/v1/enforcement/challenge/${encodeURIComponent(decisionId)}/respond`,
+    { method: "POST", body: JSON.stringify({ answer }) },
+  );
+  return body.outcome;
+}
+
+/**
+ * Ask the backend for the reauthentication that clears a blocking posture.
+ * Refused (409) unless enforcement is actually blocking, so this cannot be
+ * used to mint verification evidence during a quiet session.
+ */
+export async function requestReauthentication(): Promise<{
+  readonly decision_id: string;
+  readonly question: string;
+  readonly expires_at: string;
+}> {
+  return request("/v1/enforcement/reauthenticate", { method: "POST" });
 }
 
 /**

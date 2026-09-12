@@ -156,6 +156,22 @@ meaningful number of scored windows.
 If enforcement locks the workstation, that is a successful drill outcome, not a failure.
 Have the legitimate user's credentials to hand before you start.
 
+**What the attacker will see, in order.** At MEDIUM the console shows a soft challenge
+and a native prompt appears; work continues either way. At HIGH the console is replaced
+by a verification screen, the live stream closes, and every protected API route returns
+`403 REAUTHENTICATION_REQUIRED` — refreshing, reconnecting, signing out and back in, or
+calling the API directly all hit the same gate, because the posture belongs to the
+backend runtime and not to the browser session. A wrong answer, or letting the
+challenge expire (`challenge_timeout_seconds`), locks the session out: the same gate,
+now reporting `SESSION_LOCKED_OUT`, plus `LockWorkStation` on Windows.
+
+**Clearing it.** The legitimate user answers the security challenge — on the native
+prompt, or through the console's verification screen, which requests a fresh
+reauthentication when the dispatched one has been consumed. A correct answer restores
+access and records an A2 anchor. It does not weaken anything: the risk engine is
+untouched, so if the attacker is still at the keyboard the next windows escalate
+again, subject to the unchanged cooldown and action budget.
+
 ## Step 8 — Stop and export
 
 `Ctrl+C` the collector, then the backend.
@@ -170,10 +186,12 @@ Record, per drill:
 | Number of scored windows | `scores` rows for that session |
 | Full risk trajectory | `risk_events` / decision stream across the transition |
 | Highest risk reached | max over the trajectory |
-| Soft challenge triggered? | `decisions.action` |
+| Soft challenge triggered? | `decisions.action`; `alerts.code = ENFORCEMENT_SOFT_CHALLENGE` |
 | Interruption triggered? | `decisions.action` |
-| Lockout triggered? | `decisions.action` + `enforcement_applied` |
-| Reauthentication triggered? | `decisions.action` + `outcome` |
+| Lockout triggered? | `decisions.action` + `enforcement_applied`; `alerts.code = ENFORCEMENT_LOCKED_OUT` |
+| Reauthentication triggered? | `decisions.action` + `outcome`; `alerts.code = ENFORCEMENT_REAUTH_REQUIRED` |
+| Reauthentication succeeded or failed? | `decisions.outcome` = `CHALLENGE_ACCEPTED` / `CHALLENGE_REJECTED` / `CHALLENGE_EXPIRED`; `verification_anchors.anchor_type = A2_REAUTH` on success |
+| Enforcement-state transitions | `alerts` rows with an `ENFORCEMENT_*` code, and the matching `ALERT` records in the audit chain |
 | Time and window count to each escalation | first occurrence of each action |
 | Final enforcement outcome | `decisions.outcome` |
 

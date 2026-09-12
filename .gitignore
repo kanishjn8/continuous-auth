@@ -92,3 +92,6 @@ data/
 *.db
 *.sqlite
 *.sqlite3
+
+# Generated session export CSVs (scripts/export_session.py output)
+export_*/

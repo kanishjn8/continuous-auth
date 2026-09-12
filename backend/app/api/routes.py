@@ -203,10 +203,47 @@ def create_api_app(
             raise HTTPException(status_code=401, detail="authentication required")
         return identity
 
+    def require_unenforced(
+        identity: SessionIdentity = Depends(require_session),
+    ) -> SessionIdentity:
+        """Serve a protected resource only while enforcement is not blocking.
+
+        This is the backend enforcement point PLAN.md Section 5.2 requires
+        when it says the dashboard must not be the only one. It runs after
+        authentication, on every protected route, so a page refresh, a new
+        tab, a fresh login, or a direct request cannot walk past an
+        outstanding reauthentication or a lockout: the posture lives with the
+        runtime session, not with the browser's cookie.
+
+        The sweep runs first so that a challenge which expired while nobody
+        was looking has already escalated by the time the gate reads the
+        posture -- otherwise the first request after an ignored
+        reauthentication would be served.
+
+        A soft challenge does not block; see ``EnforcementSessionState``.
+        """
+
+        backend.sweep_expired_challenges()
+        state = backend.session_state
+        if state is not None and state.blocks_protected_access():
+            raise HTTPException(status_code=403, detail=state.posture.value)
+        return identity
+
     @app.exception_handler(401)
     async def unauthorized(request: Request, exc: object) -> JSONResponse:
         del exc
         return _safe_error(request, 401, "AUTHENTICATION_REQUIRED", "authentication required")
+
+    @app.exception_handler(403)
+    async def enforcement_blocked(request: Request, exc: object) -> JSONResponse:
+        posture = getattr(exc, "detail", "REAUTH_REQUIRED")
+        code = "SESSION_LOCKED_OUT" if posture == "LOCKED_OUT" else "REAUTHENTICATION_REQUIRED"
+        return _safe_error(
+            request,
+            403,
+            code,
+            "identity verification is required before this session may continue",
+        )
 
     @app.post("/v1/auth/login", response_model=AuthSession)
     def login(body: AuthLoginRequest, request: Request, response: Response) -> AuthSession:
@@ -253,7 +290,7 @@ def create_api_app(
         )
 
     @app.get("/v1/state", response_model=CurrentState)
-    def state(identity: SessionIdentity = Depends(require_session)) -> CurrentState:
+    def state(identity: SessionIdentity = Depends(require_unenforced)) -> CurrentState:
         del identity
         return backend.current_state()
 
@@ -261,7 +298,7 @@ def create_api_app(
     def profiles(
         cursor: str | None = None,
         limit: int | None = Query(default=None, ge=1),
-        identity: SessionIdentity = Depends(require_session),
+        identity: SessionIdentity = Depends(require_unenforced),
     ) -> ProfilePage:
         del identity
         resolved_limit = _page_limit(context, limit)
@@ -282,13 +319,13 @@ def create_api_app(
     @app.post("/v1/profiles", response_model=Profile, status_code=201)
     def create_profile(
         body: ProfileCreate,
-        identity: SessionIdentity = Depends(require_session),
+        identity: SessionIdentity = Depends(require_unenforced),
     ) -> Profile:
         del identity
         return backend.create_profile(body.user_id)
 
     @app.get("/v1/profiles/{user_id}", response_model=Profile)
-    def profile(user_id: str, identity: SessionIdentity = Depends(require_session)) -> Profile:
+    def profile(user_id: str, identity: SessionIdentity = Depends(require_unenforced)) -> Profile:
         del identity
         return backend.get_profile(user_id)
 
@@ -297,7 +334,7 @@ def create_api_app(
         cursor: str | None = None,
         limit: int | None = Query(default=None, ge=1),
         user_id: str | None = None,
-        identity: SessionIdentity = Depends(require_session),
+        identity: SessionIdentity = Depends(require_unenforced),
     ) -> DecisionPage:
         del identity
         resolved_limit = _page_limit(context, limit)
@@ -321,7 +358,7 @@ def create_api_app(
         cursor: str | None = None,
         limit: int | None = Query(default=None, ge=1),
         alert_type: AlertType | None = None,
-        identity: SessionIdentity = Depends(require_session),
+        identity: SessionIdentity = Depends(require_unenforced),
     ) -> AlertPage:
         del identity
         resolved_limit = _page_limit(context, limit)
@@ -344,7 +381,7 @@ def create_api_app(
     def acknowledge(
         alert_id: str,
         request: Request,
-        identity: SessionIdentity = Depends(require_session),
+        identity: SessionIdentity = Depends(require_unenforced),
     ) -> AdminActionResponse:
         del identity
         backend.acknowledge_alert(alert_id)
@@ -357,7 +394,7 @@ def create_api_app(
         cursor: str | None = None,
         limit: int | None = Query(default=None, ge=1),
         user_id: str | None = None,
-        identity: SessionIdentity = Depends(require_session),
+        identity: SessionIdentity = Depends(require_unenforced),
     ) -> UpdateCandidatePage:
         del identity
         resolved_limit = _page_limit(context, limit)
@@ -377,12 +414,12 @@ def create_api_app(
         )
 
     @app.get("/v1/metrics", response_model=Metrics)
-    def metrics(identity: SessionIdentity = Depends(require_session)) -> Metrics:
+    def metrics(identity: SessionIdentity = Depends(require_unenforced)) -> Metrics:
         del identity
         return backend.metrics()
 
     @app.get("/v1/health", response_model=Health)
-    def health(identity: SessionIdentity = Depends(require_session)) -> Health:
+    def health(identity: SessionIdentity = Depends(require_unenforced)) -> Health:
         del identity
         return backend.health()
 
@@ -390,7 +427,7 @@ def create_api_app(
     def shadow_mode(
         body: _ShadowModeRequest,
         request: Request,
-        identity: SessionIdentity = Depends(require_session),
+        identity: SessionIdentity = Depends(require_unenforced),
     ) -> dict[str, object]:
         del identity
         backend.set_shadow_mode(body.enabled)
@@ -400,7 +437,7 @@ def create_api_app(
     def rollback(
         user_id: str,
         request: Request,
-        identity: SessionIdentity = Depends(require_session),
+        identity: SessionIdentity = Depends(require_unenforced),
     ) -> AdminActionResponse:
         del identity
         backend.rollback(user_id)
@@ -424,8 +461,19 @@ def create_api_app(
     def configure_challenge(
         body: _ChallengeSetupRequest,
         request: Request,
-        identity: SessionIdentity = Depends(require_session),
+        identity: SessionIdentity = Depends(require_unenforced),
     ) -> dict[str, object]:
+        """Set or rotate the challenge; blocked while enforcement is blocking.
+
+        Rotation already demands the current answer, but the gate closes the
+        remaining hole: the dashboard is co-located with the monitored
+        endpoint (PLAN.md 14.4), so someone occupying a session that has been
+        escalated must not be able to touch the credential that ends the
+        escalation. First-run setup is therefore only possible before any
+        enforcement has fired -- which is what the pre-drill checklist
+        requires anyway.
+        """
+
         del identity
         backend.configure_challenge(
             question=body.question,
@@ -460,6 +508,27 @@ def create_api_app(
         )
         return {"outcome": outcome, "correlation_id": _correlation(request)}
 
+    @app.post("/v1/enforcement/reauthenticate")
+    def request_reauthentication(
+        request: Request,
+        identity: SessionIdentity = Depends(require_session),
+    ) -> dict[str, object]:
+        """Issue the challenge that clears a blocking enforcement posture.
+
+        Deliberately not behind ``require_unenforced``: it is the one thing a
+        blocked session is supposed to be able to do. It returns the question
+        and a decision id only -- the answer is then submitted through the
+        existing response endpoint, so verification, audit, and the A2 anchor
+        all run through exactly one code path.
+
+        It refuses when nothing is blocking, so a quiet session cannot mint
+        reauthentication evidence on demand.
+        """
+
+        del identity
+        opened = backend.open_reauthentication()
+        return {**opened, "correlation_id": _correlation(request)}
+
     @app.get("/v1/enforcement/status")
     def enforcement_status(
         identity: SessionIdentity = Depends(require_session),
@@ -469,7 +538,7 @@ def create_api_app(
 
     @app.get("/v1/collection/provenance")
     def collection_provenance(
-        identity: SessionIdentity = Depends(require_session),
+        identity: SessionIdentity = Depends(require_unenforced),
     ) -> dict[str, str]:
         del identity
         return backend.collection_provenance()
@@ -495,6 +564,18 @@ def create_api_app(
         if auth.authenticate(token) is None:
             await websocket.accept()
             await websocket.close(code=4401)
+            return
+        # The stream carries risk decisions and alerts, which are protected
+        # resources like any other. Reconnecting must not become the route
+        # around an outstanding reauthentication -- the dashboard reconnects
+        # automatically, so without this the gate would last exactly one
+        # request. 4403 is distinct from the 4401 the client already treats
+        # as "log in again".
+        backend.sweep_expired_challenges()
+        state = backend.session_state
+        if state is not None and state.blocks_protected_access():
+            await websocket.accept()
+            await websocket.close(code=4403)
             return
         subscription = await broker.subscribe(cursor)
         await websocket.accept()
